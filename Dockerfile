@@ -161,6 +161,8 @@ RUN chmod -R 755 /app/data /app/git-repos /app/llm \
     && chmod -R 700 /app/data/secrets \
     && chmod 755 /app/entrypoint.sh
 
+RUN chown -R aifactory:aifactory /app/web/frontend/.next && touch /app/.gitconfig && chown aifactory:aifactory /app/.gitconfig && chmod 600 /app/.gitconfig
+
 USER aifactory:aifactory
 
 # ── Health Check ───────────────────────────────────────────────────────────
