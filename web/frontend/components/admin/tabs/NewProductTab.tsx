@@ -42,11 +42,12 @@ import { type AdminLocale, t, tVars } from '@/lib/adminI18n';
 import { useNewProductTabStore } from '@/lib/newProductTabStore';
 import { LandingStylePresetPicker } from '@/components/landing/LandingStylePresetPicker';
 
-function getStepLabels(locale: AdminLocale): readonly [string, string, string] {
+function getStepLabels(locale: AdminLocale): readonly [string, string, string, string] {
   return [
     t(locale, 'newProduct.step.idea'),
     t(locale, 'newProduct.step.options'),
     t(locale, 'newProduct.step.review'),
+    'Complete',
   ];
 }
 
@@ -87,6 +88,18 @@ function getStepGuide(locale: AdminLocale) {
         t(locale, 'newProduct.guide3.c3'),
       ],
       eta: t(locale, 'newProduct.guide3.eta'),
+    },
+    {
+      step: 4,
+      name: 'Complete',
+      headline: 'Product created successfully',
+      body: 'Review the product handoff, open its pipeline, return home, or launch another idea.',
+      checklist: [
+        'Confirm the product ID',
+        'Open the product or pipeline',
+        'Choose Home or Launch New Idea',
+      ],
+      eta: 'done',
     },
   ] as const;
 }
@@ -393,9 +406,7 @@ export function NewProductTab({ locale }: { locale: AdminLocale }) {
           ? tVars(locale, 'newProduct.createdWithId', { id: pid })
           : t(locale, 'newProduct.created'),
       );
-      setIdea('');
-      setInstructions('');
-      setStep(1);
+      setStep(4);
     } catch (err: unknown) {
       setSubmitFailure(resolveActionableFailure(err, { operation: 'create_product' }));
     } finally {
@@ -414,6 +425,26 @@ export function NewProductTab({ locale }: { locale: AdminLocale }) {
     } catch {
       toast.error(t(locale, 'common.clipboardUnavailable'));
     }
+  };
+
+  const resetNewProductWizard = () => {
+    setResult(null);
+    setCreatedId(null);
+    setSubmitFailure(null);
+    setPrefillFailure(null);
+    setIdea('');
+    setInstructions('');
+    setDeliveryChoice('full_software');
+    setCategoryChoice('saas');
+    setMode('prototype');
+    setContentLocale('auto');
+    setStylePresetId('');
+    setLandingFastPath(true);
+    setAgentToWebsite(false);
+    setAimarketWidget(false);
+    setConsentAiPrefill(false);
+    setDismissedHint(false);
+    setStep(1);
   };
 
   const showHeuristic =
@@ -517,6 +548,7 @@ export function NewProductTab({ locale }: { locale: AdminLocale }) {
                 </div>
               </div>
 
+              {step === 1 ? (
               <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/25 p-4">
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-200/90">
                   <Zap className="h-3.5 w-3.5" aria-hidden />
@@ -543,6 +575,7 @@ export function NewProductTab({ locale }: { locale: AdminLocale }) {
                 </div>
               </div>
 
+              ) : null}
               {templatesFailure ? (
                 <ActionableFailurePanel failure={templatesFailure} onRetry={() => void loadCloudTemplates()} />
               ) : null}
@@ -963,6 +996,27 @@ export function NewProductTab({ locale }: { locale: AdminLocale }) {
                       ) : (
                         <p className="text-xs text-gray-500">Monitor progress in the Pipeline tab.</p>
                       )}
+                      <div className="flex flex-wrap gap-2 pt-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            resetNewProductWizard();
+                            window.location.assign('/admin?tab=dashboard');
+                          }}
+                        >
+                          Go to Home
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={resetNewProductWizard}
+                          icon={<Sparkles className="h-3.5 w-3.5" />}
+                        >
+                          Launch New Idea
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
