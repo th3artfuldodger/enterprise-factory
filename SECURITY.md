@@ -44,3 +44,13 @@ Planned out-of-scope:
 
 External audits are part of the mainnet pre-flight (see KI-2). Reports will
 be linked here once delivered.
+
+## Repository and private-data hardening
+
+The Git repository contains application source and deliberately sanitized example configuration only. Live API credentials, session secrets, customer/user data, runtime databases, logs, telemetry, uploads, support sessions, generated backups, and local environment files belong outside Git in the runtime data root or a deployment secret store.
+
+Do not commit a live `.env`, API key, password, bearer token, private key, database, or user export. Sanitized `.env.example`-style templates may define variable names but must not contain live credential values.
+
+Local pre-commit/pre-push gates under `.githooks/` and the GitHub `Security Gate` workflow scan staged/tracked content and Git history for common credential formats and private-runtime paths. If a real secret is ever committed, revoke or rotate it immediately; deleting it from the newest commit is not sufficient because Git history and remote clones may retain it.
+
+Administrative configuration responses are redacted before leaving the backend. Private admin/customer/support responses are marked `no-store`, public product routes expose only storefront-approved products, and browser customer sessions use HttpOnly cookies plus CSRF protection rather than persisting customer JWTs in local storage.

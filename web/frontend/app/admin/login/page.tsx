@@ -59,9 +59,8 @@ export default function AdminLoginPage() {
         const { publicKey } = await api.webauthnLoginOptions(username.trim() || 'admin');
         webauthnCredential = await getPasskeyAssertion(publicKey);
       }
-      // The session JWT is returned to the client but is NOT persisted: the
-      // backend sets it in an HttpOnly `aif_admin_session` cookie (out of reach
-      // of JS/XSS) that rides along on every request via credentials:'include'.
+      // Browser login uses only HttpOnly session cookies; the admin JWT never
+      // enters JavaScript or localStorage.
       await api.login(
         username.trim() || 'admin',
         passwordlessDemo ? '' : password,

@@ -17,7 +17,7 @@ pyyaml==6.0.2
 # 1.2.2 clears GHSA-mf9w-mj56-hr94.
 python-dotenv==1.2.2
 structlog==24.4.0
-httpx==0.27.2
+httpx==0.28.1
 # 3.11.6 clears PYSEC-2026-107 / GHSA-hx9q-6w63-j58v.
 orjson==3.11.6
 # 5.29.6 clears PYSEC-2026-1805 (ParseDict recursion DoS in protobuf 4.x).
@@ -34,7 +34,6 @@ sqlalchemy==2.0.35
 
 # ── LLM Providers ──────────────────────────────────────────────────────────
 openai==1.51.0
-ollama==0.3.3
 # 3.14.0 clears 25 advisories (CVE backlog GHSA-*/PYSEC-* on 3.10.5).
 aiohttp==3.14.3
 

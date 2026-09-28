@@ -50,3 +50,39 @@ Encrypts `data/config/firewall_rules.json`. Rotation procedure:
 ## Rate limiting
 
 Guest landing and some public routes use IP-based windows. Multi-instance deploys should use a shared store (Redis) for limits — not implemented in single-container dev.
+
+## Git and repository safety
+
+- Live `.env` files, databases, logs, credentials, key stores, runtime state, user data, and local backup files are ignored by Git. Only sanitized `.env.example`-style templates are allowed.
+- Local Git hooks live under `.githooks/`. The pre-commit hook scans staged blobs; the pre-push hook scans the tracked tree and Git history for high-confidence credential formats.
+- `.github/workflows/security-gate.yml` runs the same repository/history gate on every push and pull request.
+- Enable the hooks in a clone with `git config core.hooksPath .githooks` (the primary development checkout is configured this way).
+- If the history gate ever identifies a real credential, rotate/revoke it first; removing it only from the latest commit is not sufficient. Rewrite repository history only after coordinating with every clone/remote that contains the old commits.
+
+## User data and admin responses
+
+Runtime customer/user information remains under the factory data root, outside source control. Admin/customer/support responses are marked no-store, internal configuration values are redacted before they can be returned by the admin configuration endpoint, and internal product security reports plus sandbox inventory/status require authenticated admin access. Public product detail routes only expose products that have passed the public storefront visibility gate.
+
+Browser customer sessions use an HttpOnly, SameSite=Strict session cookie plus the existing CSRF double-submit protection. The web frontend no longer persists customer JWTs or customer email addresses in localStorage. Explicit non-browser clients can continue to use Bearer authentication.
+
+## Logging
+
+The web backend, orchestrator, pipeline worker, and Director install the shared secret-redaction layer before normal logging starts. Known bearer tokens, API key formats, JWTs, and token-bearing query parameters are replaced before log records reach handlers. Code that updates configuration logs the setting name, not its value.
+## Source-code / user-data boundary
+
+The Git repository is the software distribution, **not** the live factory datastore. Runtime credentials and user data must remain outside Git even when the repository itself is public.
+
+- Live `.env*` files, API keys, password/token files, private keys, SQLite databases, logs, uploads, support/customer/session data, backups, exports, and local scratch copies are denied by `.gitignore` and `scripts/security_gate.py`.
+- Sanitized templates such as `.env.example` may be committed, but must contain placeholders only.
+- Local commits run the staged security gate through `.githooks/pre-commit`; pushes scan the tracked tree and Git history through `.githooks/pre-push`. GitHub CI repeats the tracked-tree and full-history scans.
+- Runtime data belongs under `AIFACTORY_DATA_ROOT` (the standard Docker deployment bind-mounts a private host directory there). Runtime directories are owner-only and sensitive files are owner-readable/writable only.
+- Browser clients never receive provider/API secrets. Admin configuration responses are recursively redacted, and secret-looking content is redacted from server logs.
+- If a real credential is ever committed, `.gitignore` is not remediation: rotate/revoke the credential immediately, then remove it from Git history before publishing the rewritten history.
+
+For a fresh clone, activate the repository hooks with:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The CI gate remains the backstop if local hooks are missing or bypassed.

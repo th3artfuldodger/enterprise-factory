@@ -10,6 +10,9 @@
 
 set -e
 
+# Private-by-default runtime files: API keys, user data, databases and logs.
+umask 077
+
 echo "=== AI-Factory v2.1 Starting ==="
 
 # Activate Python virtual environment
@@ -47,7 +50,9 @@ mkdir -p /app/data/arch /app/data/bugs /app/data/code /app/data/specs
 mkdir -p /app/data/telemetry /app/data/feedback
 mkdir -p /app/data/reports/director
 python3 /app/scripts/ensure_config_overlay.py || echo "⚠ Config overlay bootstrap skipped"
-echo "✓ Data directories verified"
+chmod 700 /app/data /app/data/config /app/data/logs /app/data/secrets /app/data/state 2>/dev/null || true
+find /app/data/config /app/data/secrets /app/data/state /app/data/logs -maxdepth 2 -type f -exec chmod 600 {} + 2>/dev/null || true
+echo "✓ Data directories verified and private runtime permissions applied"
 
 # ── First run: autonomous pipeline (Director periodically creates products) ─
 PIPELINE_FIRST_RUN="/app/data/config/first_run_pipeline_mode.done"

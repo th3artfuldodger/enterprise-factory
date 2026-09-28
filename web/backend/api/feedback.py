@@ -188,7 +188,7 @@ async def submit_feedback(body: FeedbackSubmitRequest, request: Request):
 # — is tracking/PII and must not be disclosed to anonymous callers. The admin
 # router returns the full record for operators.
 _PUBLIC_FEEDBACK_FIELDS = frozenset(
-    {"product_id", "rating", "comment", "sentiment", "category",
+    {"product_id", "rating", "sentiment", "category",
      "feedback_class", "classification", "created_at", "ts"}
 )
 
@@ -201,8 +201,9 @@ def _public_feedback_view(fb: dict) -> dict:
 async def get_product_feedback(product_id: str):
     """Get public feedback for a product (classified + scored).
 
-    Returns only non-PII review fields; tracking identifiers and email hashes are
-    stripped for this unauthenticated endpoint (see _PUBLIC_FEEDBACK_FIELDS).
+    Returns only aggregated/non-free-text review fields. Raw comments can contain
+    accidental personal information, so anonymous callers never receive them; the
+    authenticated admin feedback view retains the full record.
     """
     fb_root = feedback_dir()
     if not fb_root.exists():

@@ -9,6 +9,7 @@ from web.backend.schemas.api_requests import DemoReplayPatchRequest
 from fastapi.responses import FileResponse
 
 from web.backend.core.admin_roles import require_admin_with_rbac
+from web.backend.services.upload_stream import stream_upload_to_path
 from web.backend.services.pipeline_demo_replay import (
     ALLOWED_EXT,
     FILENAME_SAFE,
@@ -76,17 +77,18 @@ async def upload_demo_replay_video(
     if ext not in ALLOWED_EXT:
         raise HTTPException(status_code=400, detail="Allowed extensions: .webm, .mp4, .mov")
 
-    body = await file.read()
-    if len(body) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
-        )
-
     upload_dir().mkdir(parents=True, exist_ok=True)
     safe_name = f"demo_{int(time.time())}{ext}"
     path = upload_dir() / safe_name
-    path.write_bytes(body)
+    try:
+        await stream_upload_to_path(file, path, max_bytes=MAX_UPLOAD_BYTES, min_bytes=1)
+    except ValueError as exc:
+        if "configured size limit" in str(exc):
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+            ) from exc
+        raise HTTPException(status_code=400, detail="Upload is empty or invalid") from exc
 
     old_fn = cfg.get("media_filename")
     if isinstance(old_fn, str) and old_fn and old_fn != safe_name:

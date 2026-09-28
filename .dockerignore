@@ -53,10 +53,41 @@ data/
 # Root lockfile is for host tooling (playwright); confuses Next workspace root in Docker builds.
 package-lock.json
 
-# Env and secrets must never be baked into layers
+# Env, credentials, user/runtime data and local backups must never be baked into layers
 .env
 .env.*
+*.env
+*.env.*
 !.env.example
+!*.env.example
+.npmrc
+**/.npmrc
+.pypirc
+.netrc
+**/.netrc
+git-credentials
+**/git-credentials
+credentials.json
+**/credentials.json
+client_secret.json
+**/client_secret.json
+service-account.json
+**/service-account.json
+service_account.json
+**/service_account.json
+*.pem
+*.p12
+*.pfx
+*.jks
+id_rsa
+id_ecdsa
+id_ed25519
+*.before-*
+*.pre-*
+*.backup
+*.orig
+*.rej
+*.log
 docker-compose*.yml
 !docker-compose.yml
 

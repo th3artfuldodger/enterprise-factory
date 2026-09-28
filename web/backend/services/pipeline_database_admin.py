@@ -43,8 +43,9 @@ def pipeline_db_status(config: Any) -> dict[str, Any]:
             ).fetchone()[0]
             status["sqlite_tasks"] = sm.conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
             sm.close()
-        except Exception as exc:
-            status["sqlite_error"] = str(exc)
+        except Exception:
+            logger.exception("Pipeline SQLite status check failed")
+            status["sqlite_error"] = "SQLite status check failed"
     if backend == "postgres" and url:
         try:
             from orchestrator.postgres_manager import PostgresManager
@@ -54,8 +55,9 @@ def pipeline_db_status(config: Any) -> dict[str, Any]:
             status["postgres_products"] = pg.count_products()
             status["postgres_tasks"] = pg.count_tasks()
             pg.close()
-        except Exception as exc:
-            status["postgres_error"] = str(exc)
+        except Exception:
+            logger.exception("Pipeline PostgreSQL status check failed")
+            status["postgres_error"] = "PostgreSQL status check failed"
     return status
 
 
@@ -72,8 +74,9 @@ def test_postgres_connection(database_url: str) -> dict[str, Any]:
             row = conn.execute("SELECT version()").fetchone()
         version = row[0] if row else "unknown"
         return {"ok": True, "detail": f"Connected. {version[:120]}"}
-    except Exception as exc:
-        return {"ok": False, "detail": str(exc)}
+    except Exception:
+        logger.exception("PostgreSQL connection test failed")
+        return {"ok": False, "detail": "Connection failed. Check the database settings and server logs."}
 
 
 def migrate_sqlite_to_postgres(

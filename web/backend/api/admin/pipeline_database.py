@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from web.backend.core.admin_roles import require_admin_with_rbac
@@ -12,6 +14,7 @@ from web.backend.services.pipeline_database_admin import (
 )
 
 router = APIRouter(prefix="/api/admin/pipeline-database", tags=["admin-pipeline-database"])
+logger = logging.getLogger(__name__)
 
 
 def _config(request: Request):
@@ -53,7 +56,9 @@ async def post_migrate_sqlite_to_postgres(
     try:
         result = migrate_sqlite_to_postgres(url, clear_target=clear_target)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        logger.info("Pipeline migration source database not found")
+        raise HTTPException(status_code=404, detail="SQLite source database not found") from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Pipeline database migration failed")
+        raise HTTPException(status_code=500, detail="Pipeline database migration failed") from exc
     return result

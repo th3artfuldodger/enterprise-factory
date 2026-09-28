@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from core.paths import data_root
+from web.backend.services.url_safety import validate_capture_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def _index_path() -> Path:
 def _resolve_showcase_capture_base_url(explicit: str | None = None) -> str:
     """URL Playwright uses to open sandbox preview (must be reachable from this process)."""
     if explicit and str(explicit).strip():
-        url = str(explicit).strip().rstrip("/")
+        url = validate_capture_base_url(str(explicit))
     else:
         url = (
             os.environ.get("AIFACTORY_SHOWCASE_BASE_URL", "").strip()

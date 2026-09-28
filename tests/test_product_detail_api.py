@@ -29,6 +29,7 @@ def product_detail_module(monkeypatch, tmp_path):
         "tags": ["test"],
     })
     monkeypatch.setattr(mod, "public_storefront_blocked", lambda pid: False)
+    monkeypatch.setattr(mod, "_public_storefront_grid_accepts", lambda pid, product: True)
     monkeypatch.setattr(mod, "_load_marketing", lambda pid: {"tags": ["test"], "monetization_scheme": {}})
     monkeypatch.setattr(mod, "_load_sales", lambda pid: {"pricing": {}, "license_terms": {}})
     monkeypatch.setattr(mod, "_spec_inner_for_storefront", lambda pid, product: {"features": []})
@@ -59,3 +60,11 @@ def test_build_product_detail_evolution_history_from_telemetry(product_detail_mo
     detail = mod._build_product_detail_response("prod-test-evo")
     assert len(detail["evolution_history"]) == 1
     assert detail["evolution_history"][0]["event"] == "improvement"
+
+
+def test_build_product_detail_rejects_non_storefront_product(product_detail_module, monkeypatch):
+    mod = product_detail_module
+    monkeypatch.setattr(mod, "_public_storefront_grid_accepts", lambda pid, product: False)
+    with pytest.raises(Exception) as exc_info:
+        mod._build_product_detail_response("prod-private")
+    assert getattr(exc_info.value, "status_code", None) == 404

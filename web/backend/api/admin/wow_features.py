@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 
 from web.backend.core.admin_roles import require_admin_with_rbac
+from web.backend.core.http_errors import client_error_detail
 from web.backend.schemas.api_requests import (
     PipelineReplayForkRequest,
     PromptImprovementApplyRequest,
@@ -64,7 +65,10 @@ async def post_replay_fork(
             model_override=body.model_override,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400,
+            detail=client_error_detail(exc, fallback="Invalid replay request"),
+        ) from exc
     finally:
         sm.close()
 
@@ -87,7 +91,10 @@ async def get_showcase_status(product_id: str, _admin: dict = Depends(require_ad
     try:
         return get_product_showcase_status(product_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400,
+            detail=client_error_detail(exc, fallback="Invalid showcase request"),
+        ) from exc
 
 
 @router.post("/prompts/analyze")
@@ -114,4 +121,4 @@ async def post_prompt_apply(body: PromptImprovementApplyRequest, _admin: dict = 
     try:
         return apply_proposal(body.proposal_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail=client_error_detail(exc, fallback="Proposal not found")) from exc

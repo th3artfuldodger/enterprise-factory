@@ -19,6 +19,12 @@ CONTAINER_NAME="ai-factory"
 DATA_DIR="${HOME}/aicom-data"
 FRONTEND_PORT="${FRONTEND_PORT:-8080}"
 BACKEND_PORT="${BACKEND_PORT:-8081}"
+# Bind to loopback by default. Set AIFACTORY_BIND_ADDRESS explicitly (for
+# example to a Tailscale address) when remote access is intentionally needed.
+AIFACTORY_BIND_ADDRESS="${AIFACTORY_BIND_ADDRESS:-127.0.0.1}"
+# Optional second bind (for example the host's Tailscale IP). Leave unset to
+# keep the service loopback-only.
+AIFACTORY_REMOTE_BIND_ADDRESS="${AIFACTORY_REMOTE_BIND_ADDRESS:-}"
 
 # ── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -35,8 +41,10 @@ if [[ "${1:-}" == "--help" ]]; then
     echo "  ./run.sh --help     — Show this help"
     echo ""
     echo "Environment variables:"
-    echo "  FRONTEND_PORT  — Host port for frontend (default: 8080)"
-    echo "  BACKEND_PORT   — Host port for backend  (default: 8081)"
+    echo "  FRONTEND_PORT            — Host port for frontend (default: 8080)"
+    echo "  BACKEND_PORT             — Host port for backend  (default: 8081)"
+    echo "  AIFACTORY_BIND_ADDRESS          — Primary host bind address (default: 127.0.0.1)"
+    echo "  AIFACTORY_REMOTE_BIND_ADDRESS   — Optional second host bind, e.g. a Tailscale IP"
     echo "  AIFACTORY_AUTONOMOUS_PIPELINE  — First run with this data dir: 1 = autonomous, 0 = ideas only (default, skips prompt)"
     exit 0
 fi
@@ -92,11 +100,23 @@ echo -e "  Admin:     ${GREEN}http://localhost:${FRONTEND_PORT}/admin/login${NC}
 echo -e "  Data:      ${YELLOW}${DATA_DIR}${NC}"
 echo ""
 
+PORT_ARGS=(
+    -p "${AIFACTORY_BIND_ADDRESS}:${FRONTEND_PORT}:8080"
+    -p "${AIFACTORY_BIND_ADDRESS}:${BACKEND_PORT}:8081"
+)
+if [[ -n "${AIFACTORY_REMOTE_BIND_ADDRESS}" && "${AIFACTORY_REMOTE_BIND_ADDRESS}" != "${AIFACTORY_BIND_ADDRESS}" ]]; then
+    PORT_ARGS+=(
+        -p "${AIFACTORY_REMOTE_BIND_ADDRESS}:${FRONTEND_PORT}:8080"
+        -p "${AIFACTORY_REMOTE_BIND_ADDRESS}:${BACKEND_PORT}:8081"
+    )
+fi
+
 docker run -d \
     --name "${CONTAINER_NAME}" \
     --restart unless-stopped \
-    -p "${FRONTEND_PORT}:8080" \
-    -p "${BACKEND_PORT}:8081" \
+    --security-opt no-new-privileges:true \
+    --cap-drop ALL \
+    "${PORT_ARGS[@]}" \
     -v "${DATA_DIR}:/app/data" \
     --add-host host.docker.internal:host-gateway \
     -e "AIFACTORY_AUTONOMOUS_PIPELINE=${AIFACTORY_AUTONOMOUS_PIPELINE:-}" \

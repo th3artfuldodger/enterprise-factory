@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.security_redaction import redact_text
+
 _PATH_MARKERS = ("/Users/", "/home/", "/root/", "/opt/", "/var/", "/tmp/", "C:\\", "\\\\")
 
 
@@ -23,5 +25,10 @@ def client_error_detail(
         return fallback
     lower = msg.lower()
     if any(m.lower() in lower or m in msg for m in _PATH_MARKERS):
+        return fallback
+    # If central secret redaction would alter the message, do not reflect even
+    # the redacted form. A credential-bearing error should collapse to the
+    # stable fallback rather than confirming host/user/secret structure.
+    if redact_text(msg) != msg:
         return fallback
     return msg

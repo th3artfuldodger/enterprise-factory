@@ -550,8 +550,8 @@ export interface ReleaseCockpitPayload {
 }
 
 export interface LoginResponse {
-  access_token: string;
-  token_type: string;
+  access_token?: string;
+  token_type: 'cookie' | 'bearer';
   expires_in?: number;
   /** JWT role claim: viewer | operator | admin | super_admin */
   role?: string;
@@ -765,24 +765,14 @@ class ApiClient {
     // endpoint is same-origin and always trusted.
     const trustedTarget = isTrustedRequestUrl(requestUrl);
 
-    // Admin auth rides on the HttpOnly `aif_admin_session` cookie set by the
-    // backend at login — the raw JWT is intentionally never read from JS
-    // storage (F1/F7), so an XSS payload has nothing to exfiltrate. Customer
-    // commerce still uses a client-held Bearer for non-admin endpoints.
-    const customerToken =
-      publicStorefront || typeof window === 'undefined' || !trustedTarget
-        ? null
-        : localStorage.getItem('customer_token');
-
+    // Admin and customer browser auth ride on HttpOnly cookies. Raw session
+    // JWTs are intentionally not kept in localStorage, so an XSS payload cannot
+    // simply read a long-lived credential. Bearer auth remains supported by the
+    // backend for explicit non-browser API clients.
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(fetchInit.headers as Record<string, string>),
     };
-
-    const isAdminApi = endpoint.startsWith('/admin');
-    if (customerToken && !isAdminApi) {
-      headers['Authorization'] = `Bearer ${customerToken}`;
-    }
 
     const method = (fetchInit.method || 'GET').toUpperCase();
     if (
@@ -829,7 +819,9 @@ class ApiClient {
           localStorage.removeItem('admin_token');
           clearAdminSessionAndRedirectToLogin();
         }
-        if (customerToken && !isAdminApi) {
+        if (endpoint.startsWith('/customer')) {
+          // Remove only legacy browser-held customer credentials. New sessions use
+          // HttpOnly cookies, so there should be no readable token to clean up.
           localStorage.removeItem('customer_token');
           localStorage.removeItem('customer_email');
         }
@@ -936,14 +928,14 @@ class ApiClient {
 
   // ── Customer Commerce ────────────────────────────────────────────────────
 
-  async registerCustomer(email: string, password: string): Promise<{ customer: CustomerProfile; access_token: string; token_type: string }> {
+  async registerCustomer(email: string, password: string): Promise<{ customer: CustomerProfile; access_token?: string; token_type: 'cookie' | 'bearer' }> {
     return this.request('/customer/register', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
   }
 
-  async loginCustomer(email: string, password: string): Promise<{ customer: CustomerProfile; access_token: string; token_type: string }> {
+  async loginCustomer(email: string, password: string): Promise<{ customer: CustomerProfile; access_token?: string; token_type: 'cookie' | 'bearer' }> {
     return this.request('/customer/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),

@@ -16,9 +16,16 @@ class TestSecurityManager:
     """Tests for the Security Manager."""
 
     @pytest.fixture
-    def security(self, tmp_path):
+    def security(self, tmp_path, monkeypatch):
+        # Never let auth tests consume or pollute the operator's persistent
+        # rate-limit database. Each test receives an isolated security store.
+        import core.paths as core_paths
+        from core.persistent_security_store import reset_persistent_security_store_for_tests
+
+        reset_persistent_security_store_for_tests()
+        monkeypatch.setattr(core_paths, "security_store_db_path", lambda: tmp_path / "security.db")
         audit_path = tmp_path / "logs" / "audit.jsonl"
-        return SecurityManager(
+        sm = SecurityManager(
             secret_key="test-secret-key-12345-for-testing-only",
             jwt_algorithm="HS256",
             jwt_expiry_minutes=30,
@@ -26,6 +33,8 @@ class TestSecurityManager:
             ban_minutes=15,
             audit_log_path=str(audit_path),
         )
+        yield sm
+        reset_persistent_security_store_for_tests()
 
     def test_password_hashing(self, security):
         """Test password hashing and verification."""
@@ -185,6 +194,31 @@ class TestAdminAuthAPI:
         )
         assert response.status_code == 200
         assert response.json().get("access_token")
+
+    def test_browser_admin_login_does_not_return_jwt_to_javascript(self, client, tmp_path, monkeypatch):
+        """Browser login gets an HttpOnly cookie and no JS-readable access token."""
+        from web.backend.services import admin_users_store as aus
+
+        monkeypatch.setenv("AIFACTORY_DEMO_READONLY", "1")
+        monkeypatch.setattr(aus, "USERS_PATH", tmp_path / "admin_users.json")
+        sm = SecurityManager(secret_key="test-secret-key-12345-for-testing-only")
+        aus.create_user(
+            username="admin",
+            password_hash=sm.hash_password("legacy-demo-password"),
+            role="super_admin",
+        )
+
+        response = client.post(
+            "/api/admin/auth/login",
+            headers={"Origin": "http://localhost:8080"},
+            json={"username": "admin", "password": ""},
+        )
+        assert response.status_code == 200
+        assert "access_token" not in response.json()
+        assert response.json().get("token_type") == "cookie"
+        cookies = response.headers.get("set-cookie") or ""
+        assert "aif_admin_session=" in cookies
+        assert "HttpOnly" in cookies
 
     def test_public_demo_passwordless_ignores_autofill_password(self, client, tmp_path, monkeypatch):
         """Browser autofill must not block passwordless demo entry."""

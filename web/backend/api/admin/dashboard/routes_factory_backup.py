@@ -14,7 +14,7 @@ from web.backend.services.factory_backup import (
     build_factory_backup_zip,
     preview_restore,
     restore_factory_from_upload,
-    save_restore_upload,
+    save_restore_upload_stream,
 )
 from web.backend.services.factory_backup_scheduler import (
     apply_schedule_patch,
@@ -111,8 +111,7 @@ async def factory_restore_preview(
         raise HTTPException(status_code=400, detail="Upload a .zip factory backup file")
 
     try:
-        content = await file.read()
-        token, _path = save_restore_upload(content)
+        token, _path = await save_restore_upload_stream(file)
         return preview_restore(token)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=client_error_detail(e)) from e

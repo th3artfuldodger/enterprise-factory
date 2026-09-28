@@ -21,6 +21,7 @@ from typing import Any
 
 from core.logging_utils import log_suppressed
 from core.paths import config_path, data_root, pipeline_db_path, workspace_id
+from web.backend.services.upload_stream import stream_upload_to_path
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,12 @@ _DEFAULT_SKIP_TOP_LEVEL = frozenset({"sandboxes", _RESTORE_UPLOADS_DIR})
 
 _MAX_FILES = 200_000
 _MAX_FILE_BYTES = 512 * 1024 * 1024
+
+# Restore limits defend against ZIP bombs and pathological archives. Operators
+# with legitimately larger snapshots can raise these explicitly.
+_RESTORE_MAX_FILES_DEFAULT = 250_000
+_RESTORE_MAX_UNCOMPRESSED_MB_DEFAULT = 8192
+_RESTORE_MAX_MEMBER_MB_DEFAULT = 1024
 
 
 def _should_skip_dir(name: str, *, include_sandboxes: bool) -> bool:
@@ -284,10 +291,44 @@ def _validate_zip_member_path(dest_real: Path, name: str) -> None:
         raise ValueError(f"Path traversal in backup: {name!r}") from exc
 
 
+def _restore_limit(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)) or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(1, value)
+
+
+def _validate_zip_limits(zf: zipfile.ZipFile) -> tuple[int, int]:
+    infos = [info for info in zf.infolist() if not info.is_dir()]
+    max_files = _restore_limit("AIFACTORY_FACTORY_RESTORE_MAX_FILES", _RESTORE_MAX_FILES_DEFAULT)
+    max_total = _restore_limit(
+        "AIFACTORY_FACTORY_RESTORE_MAX_UNCOMPRESSED_MB",
+        _RESTORE_MAX_UNCOMPRESSED_MB_DEFAULT,
+    ) * 1024 * 1024
+    max_member = _restore_limit(
+        "AIFACTORY_FACTORY_RESTORE_MAX_MEMBER_MB",
+        _RESTORE_MAX_MEMBER_MB_DEFAULT,
+    ) * 1024 * 1024
+
+    if len(infos) > max_files:
+        raise ValueError(f"Backup ZIP contains too many files ({len(infos)} > {max_files})")
+
+    total = 0
+    for info in infos:
+        if info.file_size > max_member:
+            raise ValueError(f"Backup member too large: {info.filename!r}")
+        total += int(info.file_size)
+        if total > max_total:
+            raise ValueError("Backup ZIP expands beyond the configured restore limit")
+    return len(infos), total
+
+
 def safe_extract_zip(zf: zipfile.ZipFile, dest: Path) -> None:
     """Extract backup ZIP into dest with ZipSlip/symlink guards (Python 3.12+ data filter)."""
     dest_real = dest.resolve()
     dest_real.mkdir(parents=True, exist_ok=True)
+    _validate_zip_limits(zf)
     for info in zf.infolist():
         _validate_zip_member(dest_real, info)
     try:
@@ -301,11 +342,10 @@ def inspect_backup_zip(zip_path: Path) -> dict[str, Any]:
     """Read manifest and file stats from an uploaded backup ZIP."""
     with zipfile.ZipFile(zip_path, "r") as zf:
         manifest = _read_backup_manifest(zf)
-        names = [n for n in zf.namelist() if not n.endswith("/")]
-        total_uncompressed = sum(zf.getinfo(n).file_size for n in names if n in zf.namelist())
+        archive_files, total_uncompressed = _validate_zip_limits(zf)
     return {
         "backup_manifest": manifest,
-        "archive_files": len(names),
+        "archive_files": archive_files,
         "archive_bytes_uncompressed": total_uncompressed,
     }
 
@@ -364,17 +404,35 @@ def scan_current_factory_state() -> dict[str, Any]:
     return out
 
 
+def _restore_upload_limit_bytes() -> tuple[int, int]:
+    max_mb = int(os.environ.get("AIFACTORY_FACTORY_RESTORE_MAX_MB", "2048") or 2048)
+    return max_mb, max(1, max_mb) * 1024 * 1024
+
+
 def save_restore_upload(content: bytes) -> tuple[str, Path]:
-    """Persist uploaded ZIP; return (token, path)."""
+    """Persist an in-memory ZIP; retained for tests and non-HTTP callers."""
     if len(content) < 32:
         raise ValueError("Upload is empty or too small")
-    max_mb = int(os.environ.get("AIFACTORY_FACTORY_RESTORE_MAX_MB", "2048") or 2048)
-    max_bytes = max_mb * 1024 * 1024
+    max_mb, max_bytes = _restore_upload_limit_bytes()
     if len(content) > max_bytes:
         raise ValueError(f"Backup ZIP exceeds limit ({max_mb} MB)")
     token = uuid.uuid4().hex
     dest = _restore_uploads_dir() / f"{token}.zip"
     dest.write_bytes(content)
+    return token, dest
+
+
+async def save_restore_upload_stream(upload: Any) -> tuple[str, Path]:
+    """Persist an HTTP upload without buffering the entire archive in memory."""
+    max_mb, max_bytes = _restore_upload_limit_bytes()
+    token = uuid.uuid4().hex
+    dest = _restore_uploads_dir() / f"{token}.zip"
+    try:
+        await stream_upload_to_path(upload, dest, max_bytes=max_bytes, min_bytes=32)
+    except ValueError as exc:
+        if "configured size limit" in str(exc):
+            raise ValueError(f"Backup ZIP exceeds limit ({max_mb} MB)") from exc
+        raise
     return token, dest
 
 

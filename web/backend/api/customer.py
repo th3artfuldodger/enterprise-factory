@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 import uuid
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 
 from core.pipeline_state_writer import append_product_to_pipeline_state
@@ -24,13 +25,17 @@ from web.backend.schemas.api_requests import (
     StripeCheckoutRequest,
 )
 from web.backend.services.commerce import CommerceService
+from web.backend.middleware.csrf import CSRF_COOKIE, new_csrf_token
+from web.backend.core.http_errors import client_error_detail
 
 router = APIRouter(prefix="/api/customer", tags=["customer"])
 commerce = CommerceService()
+logger = logging.getLogger(__name__)
 
 _REG_MAX_PER_HOUR = int(os.environ.get("AIFACTORY_CUSTOMER_REGISTER_MAX_PER_HOUR", "5"))
 _REG_WINDOW_SEC = 3600.0
 _register_attempts: dict[str, deque[float]] = defaultdict(deque)
+_LOGIN_MAX_PER_15_MIN = int(os.environ.get("AIFACTORY_CUSTOMER_LOGIN_MAX_PER_15_MIN", "15"))
 
 
 def _client_ip(request: Request) -> str:
@@ -54,10 +59,61 @@ def _enforce_register_rate_limit(ip: str) -> None:
     window.append(now)
 
 
-def _get_token_payload(authorization: Optional[str] = Header(default=None)) -> dict:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing customer token")
-    token = authorization.split(" ", 1)[1].strip()
+CUSTOMER_SESSION_COOKIE = "customer_token"
+
+
+def _customer_cookie_secure(request: Request) -> bool:
+    if (os.environ.get("AIFACTORY_PROD") or "").strip() == "1":
+        return True
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip().lower()
+    return request.url.scheme == "https" or forwarded == "https"
+
+
+def _browser_session_request(request: Request) -> bool:
+    return bool(request.headers.get("origin") or request.headers.get("referer"))
+
+
+def _enforce_login_rate_limit(request: Request) -> None:
+    from web.backend.services.shared_rate_limit import enforce_shared_rate_limit
+    enforce_shared_rate_limit(
+        f"customer-login:{_client_ip(request)}",
+        max_hits=_LOGIN_MAX_PER_15_MIN,
+        window_seconds=900.0,
+        detail="Too many login attempts. Try again later.",
+    )
+
+
+def _set_customer_session(request: Request, response: Response, token: str) -> None:
+    # Browser fetches carry Origin/Referer; command-line/API clients normally do not.
+    # Keep bearer-only clients stateless while moving browser sessions into HttpOnly cookies.
+    if not _browser_session_request(request):
+        return
+    secure = _customer_cookie_secure(request)
+    max_age = int(getattr(commerce, "jwt_expiry_seconds", 0) or 86400)
+    response.set_cookie(
+        key=CUSTOMER_SESSION_COOKIE, value=token, httponly=True, secure=secure,
+        samesite="strict", max_age=max_age, path="/",
+    )
+    response.set_cookie(
+        key=CSRF_COOKIE, value=new_csrf_token(), httponly=False, secure=secure,
+        samesite="strict", max_age=max_age, path="/",
+    )
+
+
+def _clear_customer_session(request: Request, response: Response) -> None:
+    secure = _customer_cookie_secure(request)
+    response.delete_cookie(CUSTOMER_SESSION_COOKIE, path="/", httponly=True, secure=secure, samesite="strict")
+    response.delete_cookie(CSRF_COOKIE, path="/", secure=secure, samesite="strict")
+
+
+def _get_token_payload(request: Request, authorization: Optional[str] = Header(default=None)) -> dict:
+    token = ""
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        token = (request.cookies.get(CUSTOMER_SESSION_COOKIE) or "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing customer session")
     payload = commerce.decode_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired customer token")
@@ -96,24 +152,38 @@ def _verify_stripe_signature(payload: bytes, sig_header: str, secret: str) -> bo
     return hmac.compare_digest(expected, sig)
 
 
+def _auth_response(request: Request, customer: dict, token: str) -> dict:
+    if _browser_session_request(request):
+        # The browser gets only the HttpOnly session cookie. Do not duplicate the JWT
+        # into a JavaScript-readable response body.
+        return {"customer": customer, "token_type": "cookie"}
+    return {"customer": customer, "access_token": token, "token_type": "bearer"}
+
+
 @router.post("/register")
-async def register(body: CustomerRegisterRequest, request: Request):
+async def register(body: CustomerRegisterRequest, request: Request, response: Response):
     _enforce_register_rate_limit(_client_ip(request))
     try:
         customer = commerce.register_customer(body.email, body.password)
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(
+            status_code=409,
+            detail=client_error_detail(exc, fallback="Unable to register customer"),
+        ) from exc
     token = commerce.create_token(customer["id"], customer["email"])
-    return {"customer": customer, "access_token": token, "token_type": "bearer"}
+    _set_customer_session(request, response, token)
+    return _auth_response(request, customer, token)
 
 
 @router.post("/login")
-async def login(body: CustomerLoginRequest):
+async def login(body: CustomerLoginRequest, request: Request, response: Response):
+    _enforce_login_rate_limit(request)
     customer = commerce.authenticate_customer(body.email, body.password)
     if not customer:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = commerce.create_token(customer["id"], customer["email"])
-    return {"customer": customer, "access_token": token, "token_type": "bearer"}
+    _set_customer_session(request, response, token)
+    return _auth_response(request, customer, token)
 
 
 @router.get("/me")
@@ -129,9 +199,10 @@ async def me(payload: dict = Depends(_get_token_payload)):
 
 
 @router.post("/logout")
-async def customer_logout():
-    """JWT is stateless — clients discard the bearer token after this ack."""
-    return {"ok": True, "detail": "Discard bearer token on the client"}
+async def customer_logout(request: Request, response: Response):
+    """Clear the browser customer session; bearer clients may discard their token."""
+    _clear_customer_session(request, response)
+    return {"ok": True}
 
 
 @router.post("/demo-notes")
@@ -139,7 +210,7 @@ async def demo_notes_create(body: DemoNoteCreateRequest, payload: dict = Depends
     try:
         note = commerce.create_demo_note(payload["sub"], body.title, body.body)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
     return {"note": note}
 
 
@@ -163,7 +234,7 @@ async def demo_notes_patch(
             body.body,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
     if not updated:
         raise HTTPException(status_code=404, detail="Note not found")
     return {"note": updated}
@@ -219,12 +290,14 @@ async def create_stripe_checkout_session(body: StripeCheckoutRequest, payload: d
                 },
             )
         if resp.status_code >= 400:
-            raise HTTPException(status_code=502, detail=f"Stripe error: {resp.text[:300]}")
+            logger.warning("Stripe checkout upstream rejected request (status=%s)", resp.status_code)
+            raise HTTPException(status_code=502, detail="Stripe checkout is temporarily unavailable")
         data = resp.json()
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Stripe request failed: {exc}")
+        logger.exception("Stripe checkout request failed")
+        raise HTTPException(status_code=502, detail="Stripe checkout is temporarily unavailable") from exc
 
     session_id = str(data.get("id") or "")
     if not session_id:

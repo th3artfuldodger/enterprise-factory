@@ -111,3 +111,19 @@ def test_evolution_signal_endpoint(client):
     row = json.loads(last)
     assert row.get("event_type") == "evolution_signal"
     assert row.get("data", {}).get("signal") == "nps"
+
+
+def test_browser_login_uses_httponly_cookie_without_returning_jwt(client):
+    email = "browser-cookie@example.test"
+    password = "password123"
+    headers = {"Origin": "http://localhost:8080"}
+    reg = client.post("/api/customer/register", headers=headers, json={"email": email, "password": password})
+    assert reg.status_code == 200
+    assert "access_token" not in reg.json()
+    assert reg.json().get("token_type") == "cookie"
+    assert "customer_token=" in (reg.headers.get("set-cookie") or "")
+    assert "HttpOnly" in (reg.headers.get("set-cookie") or "")
+
+    me = client.get("/api/customer/me", headers={"Origin": "http://localhost:8080"})
+    assert me.status_code == 200
+    assert me.json().get("email") == email

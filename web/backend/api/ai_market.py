@@ -22,6 +22,7 @@ from core.paths import (
     store_licenses_path,
 )
 from web.backend.api import payment as payment_api
+from web.backend.core.http_errors import client_error_detail
 from web.backend.schemas.api_requests import (
     AiMarketCapabilityInvokeRequest,
     AiMarketSearchRequest,
@@ -279,7 +280,7 @@ async def confirm_pilot_settlement(
     try:
         amount = pilot_settlement_price_usdt(product_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
 
     tx_existing = commerce.get_order_by_tx_hash(tx_hash)
     if tx_existing is not None:

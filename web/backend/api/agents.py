@@ -7,6 +7,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from web.backend.core.http_errors import client_error_detail
+
 from web.backend.services.agent_registry import (
     check_agent_key,
     list_agents,
@@ -42,7 +44,7 @@ async def agent_heartbeat(request: Request) -> dict[str, Any]:
     try:
         record = record_heartbeat(payload, verified=(reason == "verified"))
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
 
     return {
         "ok": True,

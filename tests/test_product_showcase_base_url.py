@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import pytest
+
 from web.backend.services import product_showcase as ps
 
 
@@ -17,9 +19,18 @@ def test_resolve_showcase_base_url_rewrites_9080_in_docker(monkeypatch):
 
 
 def test_resolve_showcase_base_url_explicit_passthrough(monkeypatch):
+    monkeypatch.setattr(
+        "web.backend.services.url_safety.socket.getaddrinfo",
+        lambda *_a, **_k: [(2, 1, 6, "", ("93.184.216.34", 443))],
+    )
     with patch.object(ps.Path, "is_file", return_value=True):
         url = ps._resolve_showcase_capture_base_url("https://magic-ai-factory.com")
     assert url == "https://magic-ai-factory.com"
+
+
+def test_resolve_showcase_base_url_rejects_private_override():
+    with pytest.raises(ValueError, match="private"):
+        ps._resolve_showcase_capture_base_url("http://192.168.1.10:8080")
 
 
 def test_list_showcase_gallery_skips_missing_clip(tmp_path, monkeypatch):

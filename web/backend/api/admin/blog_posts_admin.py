@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from web.backend.core.admin_roles import require_admin_with_rbac
+from web.backend.core.http_errors import client_error_detail
 from web.backend.schemas.api_requests import BlogPostBackfillRequest, BlogPostUpdateRequest, BlogScreenshotRequest
 from web.backend.services.product_blog import (
     backfill_launch_posts,
@@ -17,6 +19,7 @@ from web.backend.services.product_blog import (
 )
 
 router = APIRouter(prefix="/blog", tags=["admin-blog"], dependencies=[Depends(require_admin_with_rbac)])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/posts")
@@ -47,7 +50,10 @@ async def admin_update_blog_post(
     try:
         return update_blog_post(slug, patch, edited_by=str(admin.get("username") or "admin"))
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=404,
+            detail=client_error_detail(exc, fallback="Post not found"),
+        ) from exc
 
 
 @router.post("/posts/backfill")
@@ -75,6 +81,10 @@ async def admin_regenerate_screenshot(
     try:
         return regenerate_post_screenshot(slug, base_url=base_url)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=404,
+            detail=client_error_detail(exc, fallback="Post not found"),
+        ) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        logger.exception("Blog screenshot regeneration failed")
+        raise HTTPException(status_code=502, detail="Blog screenshot regeneration failed") from exc

@@ -35,6 +35,7 @@ import os
 import re
 
 from web.backend.core.admin_roles import require_admin_with_rbac
+from web.backend.core.http_errors import client_error_detail
 from web.backend.services.sandbox_proxy_headers import (
     sandbox_proxy_forward_headers,
     sandbox_proxy_slash_variant,
@@ -1665,8 +1666,8 @@ async def stop_sandbox(sandbox_id: str, _admin: dict = Depends(require_admin_wit
 
 
 @router.get("/status/{sandbox_id}")
-async def sandbox_status(sandbox_id: str):
-    """Get sandbox status."""
+async def sandbox_status(sandbox_id: str, _admin: dict = Depends(require_admin_with_rbac)):
+    """Get detailed sandbox status (admin only)."""
     sandbox = _lookup_sandbox(sandbox_id)
     if not sandbox:
         raise HTTPException(status_code=404, detail="Sandbox not found")
@@ -1752,7 +1753,7 @@ async def git_init(
         try:
             safe_remote = validate_git_remote_url(remote_url)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
 
     product_code_dir = resolve_product_code_dir(product_id)
     if not product_code_dir.exists():
@@ -1923,8 +1924,8 @@ def _product_has_html_files(product_id: str) -> bool:
 
 
 @router.get("/products")
-async def list_sandboxable_products():
-    """List products that have code directories available for sandbox/git.
+async def list_sandboxable_products(_admin: dict = Depends(require_admin_with_rbac)):
+    """List internal sandboxable products for the admin console only.
     Includes readiness indicators so the UI can warn about incomplete sandboxes."""
     from core.paths import data_root
 

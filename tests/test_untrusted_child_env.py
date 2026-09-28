@@ -268,7 +268,7 @@ def test_no_spawn_in_the_preview_builder_inherits_the_factory_environment() -> N
 def test_pip_env_carries_no_factory_secret(monkeypatch, tmp_path) -> None:
     """pip runs the product's build hooks; it must see none of the factory's credentials."""
     monkeypatch.setenv("AIFACTORY_DATA_ROOT", str(tmp_path))
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-must-not-reach-a-build-hook")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-placeholder-not-a-real-key")
     monkeypatch.setenv("AIFACTORY_JWT_SECRET", "jwt-must-not-reach-a-build-hook")
     monkeypatch.setenv("VERCEL_TOKEN", "publish-must-not-reach-a-build-hook")
     monkeypatch.setenv("DOCKER_HOST", "tcp://127.0.0.1:2375")

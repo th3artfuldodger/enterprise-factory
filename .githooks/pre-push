@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+python3 scripts/security_gate.py --tracked
+python3 scripts/security_gate.py --history

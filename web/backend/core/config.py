@@ -106,6 +106,12 @@ class AppConfig:
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 yaml.dump(self._config, f, default_flow_style=False, allow_unicode=True)
+            # Configuration can include deployment credentials. Keep the persisted
+            # overlay private even when the host umask is unexpectedly permissive.
+            try:
+                path.chmod(0o600)
+            except OSError:
+                logger.warning("Could not tighten config permissions for %s", path)
             try:
                 from core.config_overlay import sync_state_config_json_mirror
 
@@ -126,7 +132,7 @@ class AppConfig:
             target = target[k]
         target[keys[-1]] = value
         self._save_config()
-        logger.info(f"Config updated: {key} = {value}")
+        logger.info("Config updated: %s", key)
 
     def set_multi(self, updates: dict):
         """Set multiple values at once (flat dot-notation dict)."""
@@ -142,7 +148,7 @@ class AppConfig:
         logger.info(f"Config updated: {len(updates)} keys")
 
     def get_all(self) -> dict:
-        """Get the entire configuration."""
+        """Get the entire in-process configuration. Internal callers only."""
         return dict(self._config)
 
     @property

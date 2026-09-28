@@ -75,3 +75,24 @@ def test_restore_replaces_data(tmp_path, monkeypatch):
     assert res["ok"] is True
     assert (data / "code" / "prod-backup" / "index.html").read_text() == "<html>restored</html>"
     assert not (data / "code" / "prod-live").exists()
+
+
+def test_preview_rejects_zip_bomb_by_uncompressed_limit(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    data.mkdir(parents=True)
+    monkeypatch.setenv("AIFACTORY_DATA_ROOT", str(data))
+    monkeypatch.setenv("AIFACTORY_FACTORY_RESTORE_MAX_UNCOMPRESSED_MB", "1")
+
+    from web.backend.services.factory_backup import preview_restore, save_restore_upload
+
+    zpath = tmp_path / "bomb.zip"
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "_BACKUP_MANIFEST.json",
+            json.dumps({"backup_type": "aicom_factory_full", "workspace_id": "default"}),
+        )
+        zf.writestr("code/huge.txt", b"A" * (2 * 1024 * 1024))
+
+    token, _ = save_restore_upload(zpath.read_bytes())
+    with pytest.raises(ValueError, match="expands beyond"):
+        preview_restore(token)

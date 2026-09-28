@@ -12,6 +12,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+
+from core.security_redaction import install_secret_redaction
+install_secret_redaction()
 import os
 import signal
 import sys

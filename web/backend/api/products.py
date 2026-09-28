@@ -46,6 +46,7 @@ from web.backend.services.storefront_pricing import (
     resolve_storefront_price_usdt,
 )
 from web.backend.core.http_errors import client_error_detail
+from web.backend.core.admin_roles import require_admin_with_rbac
 from marketplace_taxonomy import MARKETPLACE_CATEGORY_IDS, canonical_marketplace_category
 
 logger = logging.getLogger(__name__)
@@ -790,7 +791,9 @@ def _build_product_detail_response(product_id: str) -> dict[str, Any]:
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    if public_storefront_blocked(product_id):
+    if public_storefront_blocked(product_id) or not _public_storefront_grid_accepts(product_id, product):
+        # The public detail route is storefront-only. Private/in-progress/customer-owned
+        # products must not become enumerable merely because somebody knows an id.
         raise HTTPException(status_code=404, detail="Product not found")
 
     marketing = _load_marketing(product_id)
@@ -926,8 +929,11 @@ async def get_product(product_id: str):
 
 
 @router.get("/{product_id}/security-report")
-async def get_product_security_report(product_id: str):
-    """Get the security report for a product (public, no auth required)."""
+async def get_product_security_report(
+    product_id: str,
+    _admin: dict = Depends(require_admin_with_rbac),
+):
+    """Get the internal security report for an authenticated administrator."""
     from web.backend.services.security_report_loader import load_security_report
 
     # SECURITY: validate product_id exists before path traversal into data/ dirs

@@ -10,6 +10,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+
+from core.security_redaction import install_secret_redaction
+install_secret_redaction()
 import math
 import os
 import re
@@ -28,6 +31,7 @@ from web.backend.cors_settings import get_cors_allow_origins
 from web.backend.services.site_head_snippet import strip_google_analytics_html
 
 from core.logging_utils import log_suppressed
+from core.security_redaction import redact_structure
 from core.public_site_url import resolve_public_site_url
 from core.paths import (
     benchmark_alerts_path,
@@ -379,6 +383,12 @@ async def add_security_headers(request: Request, call_next):
     else:
         response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+    response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+    if path.startswith(("/api/admin", "/api/customer", "/api/support", "/api/feedback")):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
     csp = (os.environ.get("AIFACTORY_CSP") or "").strip()
     if (
         not csp
@@ -649,9 +659,9 @@ async def reload_config(_admin: dict = Depends(require_admin_with_rbac)):
 
 @app.get("/api/admin/config")
 async def get_config(_admin: dict = Depends(require_admin_with_rbac)):
-    """Get full configuration (admin only)."""
+    """Get a secret-redacted configuration projection (admin only)."""
     _ = _admin
-    return app.state.config.get_all()
+    return redact_structure(app.state.config.get_all())
 
 
 @app.post("/api/admin/config/theme")
@@ -867,7 +877,12 @@ async def get_admin_settings(_admin: dict = Depends(require_admin_with_rbac)):
         "llm_limits": llm_limits,
         "quality": admin_quality_panel_dict(),
         "pipeline_db_backend": str(config.get("general.pipeline_db_backend", "sqlite") or "sqlite"),
-        "pipeline_database_url": str(config.get("general.pipeline_database_url", "") or ""),
+        # Treat the PostgreSQL URL like every other credential-bearing setting:
+        # never return the raw value to browser JavaScript.  The sentinel lets
+        # autosave round-trip an unchanged secret without clobbering it.
+        "pipeline_database_url": (
+            SECRET_MASK if str(config.get("general.pipeline_database_url", "") or "") else ""
+        ),
         "pipeline_database_url_masked": mask_database_url(
             str(config.get("general.pipeline_database_url", "") or "")
         ),
@@ -951,8 +966,9 @@ async def update_admin_settings(request: Request, admin: dict = Depends(require_
     for key in allowed_keys:
         if key in body:
             val = body[key]
-            if key == "docker_password" and isinstance(val, str) and val == SECRET_MASK:
-                # GET returns a mask; an unchanged mask means "keep the stored secret".
+            if key in {"docker_password", "pipeline_database_url"} and isinstance(val, str) and val == SECRET_MASK:
+                # GET returns a mask for stored credentials; an unchanged mask
+                # means "keep the stored secret".
                 continue
             if key == "reference_prompt_max_chars" and val is not None:
                 try:

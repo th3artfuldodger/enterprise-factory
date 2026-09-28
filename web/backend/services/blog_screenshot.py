@@ -12,6 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from core.paths import blog_assets_dir
+from web.backend.services.url_safety import validate_capture_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def blog_asset_path(product_id: str) -> Path:
 
 def resolve_capture_base_url(explicit: str | None = None) -> str:
     if explicit and str(explicit).strip():
-        return str(explicit).strip().rstrip("/")
+        return validate_capture_base_url(str(explicit))
     url = (
         os.environ.get("AIFACTORY_BLOG_CAPTURE_BASE_URL", "").strip()
         or os.environ.get("AIFACTORY_SHOWCASE_BASE_URL", "").strip()

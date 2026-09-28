@@ -1,6 +1,6 @@
 /**
- * Live admin metrics stream — WebSocket when Bearer token exists (EventSource cannot set headers).
- * Falls back to SSE for cookie-only admin sessions.
+ * Live admin metrics stream for cookie-authenticated admin sessions.
+ * Uses same-origin SSE so raw admin JWTs never enter JavaScript.
  */
 
 export type AdminMetricsStreamHandlers = {
@@ -12,7 +12,6 @@ export type AdminMetricsStreamHandlers = {
 export function connectAdminMetricsStream(handlers: AdminMetricsStreamHandlers): () => void {
   if (typeof window === 'undefined') return () => {};
 
-  let ws: WebSocket | null = null;
   let es: EventSource | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
@@ -25,29 +24,8 @@ export function connectAdminMetricsStream(handlers: AdminMetricsStreamHandlers):
 
   const connect = () => {
     if (stopped) return;
-    const token = localStorage.getItem('admin_token');
-    if (token) {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const url = `${proto}//${window.location.host}/api/admin/ws/metrics`;
-      ws = new WebSocket(url, ['Bearer', token]);
-      ws.onopen = () => handlers.onOpen?.();
-      ws.onmessage = (ev) => {
-        try {
-          handlers.onMessage(JSON.parse(ev.data));
-        } catch {
-          /* ignore */
-        }
-      };
-      ws.onerror = () => {
-        ws?.close();
-      };
-      ws.onclose = (ev) => {
-        ws = null;
-        if (!stopped && !ev.wasClean) scheduleRetry();
-      };
-      return;
-    }
-
+    // Browser admin sessions are cookie-only; never recover or transport a raw
+    // JWT through JavaScript. EventSource sends same-origin HttpOnly cookies.
     es = new EventSource('/api/admin/metrics/stream');
     es.onopen = () => handlers.onOpen?.();
     es.onmessage = (ev) => {
@@ -69,7 +47,6 @@ export function connectAdminMetricsStream(handlers: AdminMetricsStreamHandlers):
   return () => {
     stopped = true;
     clearTimeout(retryTimer);
-    ws?.close();
     es?.close();
   };
 }

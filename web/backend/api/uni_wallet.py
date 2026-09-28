@@ -23,6 +23,7 @@ from core.uni.pricing import uni_to_usd
 from core.uni.receipts import get_receipt, list_receipts_for_wallet
 from core.uni.wallet import UniWalletError, UniWalletService
 from web.backend.core.admin_roles import require_admin_with_rbac
+from web.backend.core.http_errors import client_error_detail
 from web.backend.services.customer_auth import require_customer
 from web.backend.services.uni_bridge import uni_wallet
 
@@ -170,7 +171,7 @@ async def grant_uni(body: UniGrantRequest, _: None = Depends(_require_grant_secr
             meta={"reason": body.reason},
         )
     except UniWalletError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
     return {"status": "granted", **out}
 
 
@@ -283,7 +284,7 @@ async def confirm_topup(body: UniTopupConfirmRequest, customer: dict = Depends(r
             token=token,
         )
     except UniWalletError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
     return {"status": "credited", **out}
 
 
@@ -312,7 +313,7 @@ async def request_withdraw(body: UniWithdrawRequest, customer: dict = Depends(re
             token=body.token.strip().upper(),
         )
     except UniWalletError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
     return {"status": "queued", **out}
 
 

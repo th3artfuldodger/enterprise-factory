@@ -48,7 +48,10 @@ export function PipelineDatabaseSettings({
     setTestBusy(true);
     setMessage(null);
     try {
-      const res = await api.testPipelineDatabaseConnection(databaseUrl.trim() || undefined);
+      const candidate = databaseUrl.trim();
+      const res = await api.testPipelineDatabaseConnection(
+        candidate && candidate !== '***' ? candidate : undefined,
+      );
       setMessage(res.ok ? `✅ ${res.detail}` : `❌ ${res.detail}`);
     } catch (e: unknown) {
       setMessage(`❌ ${e instanceof Error ? e.message : t(locale, 'settings.pipelineDb.testFailed')}`);
@@ -64,8 +67,9 @@ export function PipelineDatabaseSettings({
     setMigrateBusy(true);
     setMessage(null);
     try {
+      const candidate = databaseUrl.trim();
       const res = await api.migratePipelineSqliteToPostgres({
-        database_url: databaseUrl.trim() || undefined,
+        database_url: candidate && candidate !== '***' ? candidate : undefined,
         clear_target: false,
       });
       setMessage(

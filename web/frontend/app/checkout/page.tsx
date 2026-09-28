@@ -236,8 +236,11 @@ export default function CheckoutPage() {
   useEffect(() => {
     const initialProduct = new URLSearchParams(window.location.search).get('product');
     if (initialProduct) setProductId(initialProduct);
-    const savedEmail = typeof window !== 'undefined' ? localStorage.getItem('customer_email') : null;
-    if (savedEmail) setCustomerEmail(savedEmail);
+    api.getCustomerMe().then((profile) => {
+      if (profile?.email) setCustomerEmail(profile.email);
+    }).catch(() => {
+      setCustomerEmail(null);
+    });
     api.getSupportedChains().then((meta: any) => {
       if (Array.isArray(meta?.chains) && meta.chains.length > 0) {
         setSupportedChains(meta.chains);
@@ -277,8 +280,6 @@ export default function CheckoutPage() {
       const res = authMode === 'register'
         ? await api.registerCustomer(authEmail, authPassword)
         : await api.loginCustomer(authEmail, authPassword);
-      localStorage.setItem('customer_token', res.access_token);
-      localStorage.setItem('customer_email', res.customer.email);
       setCustomerEmail(res.customer.email);
     } catch (err: any) {
       setErrorMessage(err?.message || 'Customer authentication failed');

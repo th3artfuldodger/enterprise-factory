@@ -348,13 +348,18 @@ async def admin_login(request: Request, response: Response, login_data: LoginReq
         path="/",
     )
 
-    return {
-        "access_token": token,
-        "token_type": "bearer",
+    browser_session = bool(request.headers.get("origin") or request.headers.get("referer"))
+    response_body = {
+        "token_type": "cookie" if browser_session else "bearer",
         "expires_in": max_age,
         "role": normalize_role(role_str).value,
         "csrf_token": csrf,
     }
+    if not browser_session:
+        # Explicit API clients still receive a bearer token. Browser sessions rely
+        # solely on the HttpOnly cookie so JavaScript never receives the admin JWT.
+        response_body["access_token"] = token
+    return response_body
 
 
 @router.post("/logout")
