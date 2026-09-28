@@ -928,17 +928,17 @@ class ApiClient {
 
   // ── Customer Commerce ────────────────────────────────────────────────────
 
-  async registerCustomer(email: string, password: string): Promise<{ customer: CustomerProfile; access_token?: string; token_type: 'cookie' | 'bearer' }> {
+  async registerCustomer(email: string, password: string, website = ''): Promise<{ customer: CustomerProfile; access_token?: string; token_type: 'cookie' | 'bearer' }> {
     return this.request('/customer/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, website }),
     });
   }
 
-  async loginCustomer(email: string, password: string): Promise<{ customer: CustomerProfile; access_token?: string; token_type: 'cookie' | 'bearer' }> {
+  async loginCustomer(email: string, password: string, website = ''): Promise<{ customer: CustomerProfile; access_token?: string; token_type: 'cookie' | 'bearer' }> {
     return this.request('/customer/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, website }),
     });
   }
 

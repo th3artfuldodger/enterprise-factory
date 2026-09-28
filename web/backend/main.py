@@ -24,7 +24,7 @@ from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from prometheus_client import make_asgi_app
 
 from web.backend.cors_settings import get_cors_allow_origins
@@ -372,6 +372,28 @@ def _sandbox_preview_embed_path(path: str) -> bool:
     return _sandbox_relaxed_security_path(path) and not path.startswith("/api/sandbox/view/")
 
 
+def _force_https_enabled() -> bool:
+    return os.environ.get("AIFACTORY_FORCE_HTTPS", "").lower() in ("1", "true", "yes")
+
+
+def _request_uses_https(request: Request) -> bool:
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip().lower()
+    return request.url.scheme == "https" or forwarded == "https"
+
+
+@app.middleware("http")
+async def force_https(request: Request, call_next):
+    """Redirect public HTTP traffic to HTTPS when production TLS enforcement is enabled."""
+    if (
+        _force_https_enabled()
+        and request.url.path != "/api/health"
+        and not _request_uses_https(request)
+    ):
+        target = request.url.replace(scheme="https")
+        return RedirectResponse(url=str(target), status_code=308)
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Baseline security headers for all responses (API + any HTML)."""
@@ -400,7 +422,7 @@ async def add_security_headers(request: Request, call_next):
         csp = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"
     if csp and not _html_page_owns_csp(path):
         response.headers.setdefault("Content-Security-Policy", csp)
-    if os.environ.get("AIFACTORY_ENABLE_HSTS", "").lower() in ("1", "true", "yes"):
+    if _force_https_enabled() or os.environ.get("AIFACTORY_ENABLE_HSTS", "").lower() in ("1", "true", "yes"):
         hsts = "max-age=31536000; includeSubDomains"
         if os.environ.get("AIFACTORY_HSTS_PRELOAD", "").lower() in ("1", "true", "yes"):
             hsts += "; preload"

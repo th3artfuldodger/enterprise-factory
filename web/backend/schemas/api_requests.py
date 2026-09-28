@@ -7,6 +7,12 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+
+class StrictRequestModel(BaseModel):
+    """Fail closed on unknown request fields to block parameter/field tampering."""
+
+    model_config = ConfigDict(extra="forbid")
+
 _DELIVERY = Literal["marketing_landing", "full_software", "desktop_app"]
 _LOCALE_RE = r"^[a-z]{2}(-[A-Za-z]{2,8})?$"
 _PRODUCT_ID_RE = re.compile(r"^prod-[a-z0-9]{8,64}$", re.I)
@@ -20,7 +26,7 @@ _FEEDBACK_SOURCE = Literal["product_page", "widget", "sandbox", "other"]
 # ── Products / discovery (admin + guest) ─────────────────────────────────────
 
 
-class CreateProductRequest(BaseModel):
+class CreateProductRequest(StrictRequestModel):
     idea: str = Field(..., min_length=3, max_length=8000)
     admin_instructions: Optional[str] = Field(None, max_length=16000)
     delivery_profile: Optional[_DELIVERY] = None
@@ -53,7 +59,7 @@ class CreateProductRequest(BaseModel):
         return s[:16]
 
 
-class BatchCreateIdeasRequest(BaseModel):
+class BatchCreateIdeasRequest(StrictRequestModel):
     ideas: list[str] = Field(..., min_length=1, max_length=50)
     mode: Literal["continue_on_error", "fail_fast"] = "continue_on_error"
     max_immediate_start: int = Field(2, ge=1, le=20)
@@ -79,12 +85,12 @@ class BatchCreateIdeasRequest(BaseModel):
         return out
 
 
-class RunDiscoveryRequest(BaseModel):
+class RunDiscoveryRequest(StrictRequestModel):
     create_product: bool = True
     top_k: int = Field(5, ge=1, le=20)
 
 
-class GuestLandingRequest(BaseModel):
+class GuestLandingRequest(StrictRequestModel):
     phrase: str = Field(..., min_length=8, max_length=2000)
     preset_id: str | None = Field(
         default=None,
@@ -100,9 +106,10 @@ class GuestLandingRequest(BaseModel):
 # ── Customer portal ─────────────────────────────────────────────────────────
 
 
-class CustomerRegisterRequest(BaseModel):
+class CustomerRegisterRequest(StrictRequestModel):
     email: str = Field(..., min_length=3, max_length=254)
     password: str = Field(..., min_length=8, max_length=128)
+    website: str = Field("", max_length=200, exclude=True)
 
     @field_validator("email")
     @classmethod
@@ -113,9 +120,10 @@ class CustomerRegisterRequest(BaseModel):
         return s
 
 
-class CustomerLoginRequest(BaseModel):
+class CustomerLoginRequest(StrictRequestModel):
     email: str = Field(..., min_length=3, max_length=254)
     password: str = Field(..., min_length=8, max_length=128)
+    website: str = Field("", max_length=200, exclude=True)
 
     @field_validator("email")
     @classmethod
@@ -123,7 +131,7 @@ class CustomerLoginRequest(BaseModel):
         return CustomerRegisterRequest.validate_email(v)
 
 
-class CustomerCreateRunRequest(BaseModel):
+class CustomerCreateRunRequest(StrictRequestModel):
     idea: str = Field(..., min_length=8, max_length=2000)
 
     @field_validator("idea")
@@ -132,12 +140,12 @@ class CustomerCreateRunRequest(BaseModel):
         return v.strip()
 
 
-class DemoNoteCreateRequest(BaseModel):
+class DemoNoteCreateRequest(StrictRequestModel):
     title: str = Field(..., min_length=1, max_length=500)
     body: str = Field("", max_length=8000)
 
 
-class DemoNotePatchRequest(BaseModel):
+class DemoNotePatchRequest(StrictRequestModel):
     title: Optional[str] = Field(None, max_length=500)
     body: Optional[str] = Field(None, max_length=8000)
 
@@ -148,7 +156,7 @@ class DemoNotePatchRequest(BaseModel):
         return self
 
 
-class StripeCheckoutRequest(BaseModel):
+class StripeCheckoutRequest(StrictRequestModel):
     target_plan: _STRIPE_PLAN = "maker"
     success_url: str = Field(..., min_length=8, max_length=2000)
     cancel_url: str = Field(..., min_length=8, max_length=2000)
@@ -165,7 +173,7 @@ class StripeCheckoutRequest(BaseModel):
 # ── Feedback ──────────────────────────────────────────────────────────────────
 
 
-class FeedbackSubmitRequest(BaseModel):
+class FeedbackSubmitRequest(StrictRequestModel):
     product_id: str = Field(..., min_length=5, max_length=80)
     rating: int = Field(..., ge=1, le=5)
     comment: str = Field(..., min_length=1, max_length=4000)
@@ -199,7 +207,7 @@ class FeedbackSubmitRequest(BaseModel):
 # ── Payments ──────────────────────────────────────────────────────────────────
 
 
-class CreatePaymentRequest(BaseModel):
+class CreatePaymentRequest(StrictRequestModel):
     model_config = ConfigDict(extra="forbid")
 
     product_id: str = Field(..., min_length=5, max_length=80)
@@ -229,7 +237,7 @@ class CreatePaymentRequest(BaseModel):
         return self
 
 
-class ConfirmPaymentRequest(BaseModel):
+class ConfirmPaymentRequest(StrictRequestModel):
     tx_hash: str = Field(..., min_length=16, max_length=128)
 
     @field_validator("tx_hash")
@@ -246,7 +254,7 @@ class ConfirmPaymentRequest(BaseModel):
 # ── AI Market pilot ─────────────────────────────────────────────────────────
 
 
-class AiMarketSearchRequest(BaseModel):
+class AiMarketSearchRequest(StrictRequestModel):
     task_description: str = Field("", max_length=4000)
 
     @field_validator("task_description")
@@ -255,7 +263,7 @@ class AiMarketSearchRequest(BaseModel):
         return v.strip()
 
 
-class AiMarketSettlementConfirmRequest(BaseModel):
+class AiMarketSettlementConfirmRequest(StrictRequestModel):
     product_id: str = Field(..., min_length=5, max_length=80)
     tx_hash: str = Field(..., min_length=16, max_length=128)
     chain: Optional[str] = Field(None, max_length=32)
@@ -274,7 +282,7 @@ class AiMarketSettlementConfirmRequest(BaseModel):
         return s
 
 
-class AiMarketCapabilityInvokeRequest(BaseModel):
+class AiMarketCapabilityInvokeRequest(StrictRequestModel):
     """Optional JSON body for capability invoke (pilot echoes safely bounded fields)."""
 
     input: dict[str, Any] = Field(default_factory=dict)
@@ -306,7 +314,7 @@ def _validated_product_id(v: str) -> str:
     return s
 
 
-class TelemetryEventRequest(BaseModel):
+class TelemetryEventRequest(StrictRequestModel):
     product_id: str = Field(..., min_length=5, max_length=80)
     event_type: str = Field(..., min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]{1,63}$")
     data: dict[str, Any] = Field(default_factory=dict)
@@ -327,7 +335,7 @@ class TelemetryEventRequest(BaseModel):
         return v
 
 
-class EvolutionSignalRequest(BaseModel):
+class EvolutionSignalRequest(StrictRequestModel):
     product_id: str = Field(..., min_length=5, max_length=80)
     signal: str = Field(..., min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]{1,63}$")
     weight: float = Field(0.5, ge=0.0, le=1.0)
@@ -343,7 +351,7 @@ class EvolutionSignalRequest(BaseModel):
 # ── Support chat ──────────────────────────────────────────────────────────────
 
 
-class SupportUiContext(BaseModel):
+class SupportUiContext(StrictRequestModel):
     current_page: Optional[str] = Field(None, max_length=200)
     active_tab: Optional[str] = Field(None, max_length=200)
     selected_product_id: Optional[str] = Field(None, max_length=80)
@@ -372,7 +380,7 @@ class SupportUiContext(BaseModel):
         return s
 
 
-class SupportCreateSessionRequest(BaseModel):
+class SupportCreateSessionRequest(StrictRequestModel):
     product_id: Optional[str] = Field(None, max_length=80)
     ui_context: Optional[SupportUiContext] = None
 
@@ -387,7 +395,7 @@ class SupportCreateSessionRequest(BaseModel):
         return s
 
 
-class SupportPostMessageRequest(BaseModel):
+class SupportPostMessageRequest(StrictRequestModel):
     message: str = Field(..., min_length=1, max_length=4000)
     ui_context: Optional[SupportUiContext] = None
 
@@ -395,7 +403,7 @@ class SupportPostMessageRequest(BaseModel):
 # ── Admin demo replay ─────────────────────────────────────────────────────────
 
 
-class DemoReplayPatchRequest(BaseModel):
+class DemoReplayPatchRequest(StrictRequestModel):
     enabled: Optional[bool] = None
     title: Optional[str] = Field(None, max_length=200)
     video_url: Optional[str] = Field(None, max_length=2000)
@@ -412,22 +420,22 @@ class DemoReplayPatchRequest(BaseModel):
 # ── Wow demo features ─────────────────────────────────────────────────────────
 
 
-class PipelineReplayForkRequest(BaseModel):
+class PipelineReplayForkRequest(StrictRequestModel):
     frame_index: int = Field(..., ge=0)
     operator_notes: Optional[str] = Field(None, max_length=2000)
     model_override: Optional[str] = Field(None, max_length=120)
 
 
-class ProductShowcaseEnqueueRequest(BaseModel):
+class ProductShowcaseEnqueueRequest(StrictRequestModel):
     product_id: str = Field(..., min_length=6, max_length=80)
     base_url: Optional[str] = Field(None, max_length=500)
 
 
-class PromptImprovementApplyRequest(BaseModel):
+class PromptImprovementApplyRequest(StrictRequestModel):
     proposal_id: str = Field(..., min_length=4, max_length=120)
 
 
-class BlogPostUpdateRequest(BaseModel):
+class BlogPostUpdateRequest(StrictRequestModel):
     title: Optional[str] = Field(None, min_length=1, max_length=300)
     excerpt: Optional[str] = Field(None, max_length=500)
     readTime: Optional[str] = Field(None, max_length=40)
@@ -439,12 +447,12 @@ class BlogPostUpdateRequest(BaseModel):
     relatedProducts: Optional[list[dict[str, Any]]] = None
 
 
-class BlogPostBackfillRequest(BaseModel):
+class BlogPostBackfillRequest(StrictRequestModel):
     only_missing: bool = True
     capture_screenshots: bool = False
     overwrite: bool = False
     base_url: Optional[str] = Field(None, max_length=500)
 
 
-class BlogScreenshotRequest(BaseModel):
+class BlogScreenshotRequest(StrictRequestModel):
     base_url: Optional[str] = Field(None, max_length=500)

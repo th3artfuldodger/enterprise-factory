@@ -83,6 +83,12 @@ def _enforce_login_rate_limit(request: Request) -> None:
     )
 
 
+def _enforce_bot_honeypot(value: str) -> None:
+    """Reject automated form fillers that populate the invisible website field."""
+    if (value or "").strip():
+        raise HTTPException(status_code=400, detail="Invalid authentication request")
+
+
 def _set_customer_session(request: Request, response: Response, token: str) -> None:
     # Browser fetches carry Origin/Referer; command-line/API clients normally do not.
     # Keep bearer-only clients stateless while moving browser sessions into HttpOnly cookies.
@@ -162,6 +168,7 @@ def _auth_response(request: Request, customer: dict, token: str) -> dict:
 
 @router.post("/register")
 async def register(body: CustomerRegisterRequest, request: Request, response: Response):
+    _enforce_bot_honeypot(body.website)
     _enforce_register_rate_limit(_client_ip(request))
     try:
         customer = commerce.register_customer(body.email, body.password)
@@ -177,6 +184,7 @@ async def register(body: CustomerRegisterRequest, request: Request, response: Re
 
 @router.post("/login")
 async def login(body: CustomerLoginRequest, request: Request, response: Response):
+    _enforce_bot_honeypot(body.website)
     _enforce_login_rate_limit(request)
     customer = commerce.authenticate_customer(body.email, body.password)
     if not customer:

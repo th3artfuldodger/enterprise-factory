@@ -186,6 +186,7 @@ export default function CheckoutPage() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [authWebsite, setAuthWebsite] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [customerEmail, setCustomerEmail] = useState<string | null>(null);
   const [paymentTestnet, setPaymentTestnet] = useState(false);
@@ -278,8 +279,8 @@ export default function CheckoutPage() {
     setErrorMessage('');
     try {
       const res = authMode === 'register'
-        ? await api.registerCustomer(authEmail, authPassword)
-        : await api.loginCustomer(authEmail, authPassword);
+        ? await api.registerCustomer(authEmail, authPassword, authWebsite)
+        : await api.loginCustomer(authEmail, authPassword, authWebsite);
       setCustomerEmail(res.customer.email);
     } catch (err: any) {
       setErrorMessage(err?.message || 'Customer authentication failed');
@@ -558,6 +559,17 @@ export default function CheckoutPage() {
                       value={authPassword}
                       onChange={(e) => setAuthPassword(e.target.value)}
                     />
+                    <div className="absolute -left-[9999px] h-px w-px overflow-hidden" aria-hidden="true">
+                      <label htmlFor="customer-website">Website</label>
+                      <input
+                        id="customer-website"
+                        name="website"
+                        tabIndex={-1}
+                        autoComplete="off"
+                        value={authWebsite}
+                        onChange={(e) => setAuthWebsite(e.target.value)}
+                      />
+                    </div>
                     <div className="flex items-center gap-2">
                       <Button
                         variant="secondary"
