@@ -4,6 +4,7 @@ Public support chat API — **Lumen** floating assistant + triage → pipeline /
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -95,19 +96,24 @@ def _verify_session_token(sess: dict[str, Any], token: Optional[str]) -> None:
     if not _support_token_required():
         logger.info("support session access: id=%s (token auth disabled)", sid_short)
         return
-    expected = sess.get("access_token")
-    if not expected or not isinstance(expected, str):
-        logger.warning("support session access denied: no access_token on record id=%s", sid_short)
-        raise HTTPException(
-            status_code=410,
-            detail="Session expired. Open the chat again.",
-        )
-    if not token or not secrets.compare_digest(token, expected):
+    expected_hash = sess.get("access_token_sha256")
+    legacy_expected = sess.get("access_token")
+    if not token:
         logger.warning("support session access denied: invalid/missing token id=%s", sid_short)
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid session token. Open the chat again.",
-        )
+        raise HTTPException(status_code=401, detail="Invalid session token. Open the chat again.")
+    supplied_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    if isinstance(expected_hash, str) and expected_hash:
+        valid = secrets.compare_digest(supplied_hash, expected_hash)
+    elif isinstance(legacy_expected, str) and legacy_expected:
+        # Compatibility for sessions created before token-at-rest hashing. New
+        # sessions never persist plaintext tokens.
+        valid = secrets.compare_digest(token, legacy_expected)
+    else:
+        logger.warning("support session access denied: no token verifier on record id=%s", sid_short)
+        raise HTTPException(status_code=410, detail="Session expired. Open the chat again.")
+    if not valid:
+        logger.warning("support session access denied: invalid/missing token id=%s", sid_short)
+        raise HTTPException(status_code=401, detail="Invalid session token. Open the chat again.")
     logger.info("support session access granted: id=%s", sid_short)
 
 
@@ -143,16 +149,43 @@ def _load_session(sid: str) -> dict[str, Any]:
     if not p.is_file():
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         raise HTTPException(status_code=500, detail="Corrupt session")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=500, detail="Corrupt session")
+
+    # One-time migration for sessions written before token-at-rest hashing was
+    # introduced. Hashing the already-persisted bearer value preserves the
+    # client's existing token while removing plaintext credential material from
+    # disk on the first subsequent read.
+    legacy = data.get("access_token")
+    if isinstance(legacy, str) and legacy and not data.get("access_token_sha256"):
+        data["access_token_sha256"] = hashlib.sha256(legacy.encode("utf-8")).hexdigest()
+        data.pop("access_token", None)
+        _save_session(data)
+    return data
 
 
 def _save_session(data: dict[str, Any]) -> None:
     sid = data.get("id") or ""
     p = _session_path(sid)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    try:
+        p.parent.chmod(0o700)
+    except OSError:
+        pass
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    try:
+        tmp.chmod(0o600)
+    except OSError:
+        pass
+    tmp.replace(p)
+    try:
+        p.chmod(0o600)
+    except OSError:
+        pass
 
 
 def _ui_context_dict(ctx: Optional[Any]) -> dict[str, str]:
@@ -205,7 +238,7 @@ async def create_session(request: Request, body: SupportCreateSessionRequest):
         "updated_at": now,
         "client_ip_hash": str(hash(ip))[-8:],
         "messages": [],
-        "access_token": access_token,
+        "access_token_sha256": hashlib.sha256(access_token.encode("utf-8")).hexdigest(),
         "meta": {
             "bot": support_agent.SUPPORT_BOT_NAME,
             "bot_slug": support_agent.SUPPORT_BOT_SLUG,

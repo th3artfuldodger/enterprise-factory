@@ -26,3 +26,21 @@ def test_run_script_has_no_wildcard_port_publish():
 def test_run_script_drops_linux_privileges():
     assert "--security-opt no-new-privileges:true" in RUN_SH
     assert "--cap-drop ALL" in RUN_SH
+
+
+def test_run_script_does_not_put_provider_secrets_in_docker_metadata():
+    forbidden = (
+        '-e "DEEPSEEK_API_KEY=',
+        '-e "OPENROUTER_API_KEY=',
+        '-e "ANTHROPIC_API_KEY=',
+        '-e "GROQ_API_KEY=',
+        '-e "TOGETHER_API_KEY=',
+        '-e "JWT_SECRET_KEY=',
+    )
+    for needle in forbidden:
+        assert needle not in RUN_SH
+    assert 'secrets/llm' in RUN_SH
+
+
+def test_run_script_can_persist_remote_bind_outside_git():
+    assert '${DATA_DIR}/config/remote_bind_address' in RUN_SH

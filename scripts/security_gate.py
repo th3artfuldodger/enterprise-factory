@@ -17,7 +17,7 @@ import subprocess
 import sys
 from typing import Iterable
 
-SAFE_ENV_TEMPLATE_NAMES = {'.env.example', '.env.demo', '.env.vps.example'}
+SAFE_ENV_TEMPLATE_NAMES = {'.env.example', '.env.demo.example', '.env.vps.example'}
 PLACEHOLDER_WORDS = (
     'example', 'dummy', 'demo', 'test', 'placeholder', 'changeme', 'replace',
     'your_', 'your-', 'fake', '<', '${', 'localhost', '127.0.0.1', '...', '__'
@@ -49,13 +49,17 @@ def run(*args: str) -> bytes:
     return subprocess.check_output(args, stderr=subprocess.DEVNULL)
 
 
-def forbidden_path(path: str) -> str | None:
+def forbidden_path(path: str, *, history: bool = False) -> str | None:
     p = path.replace('\\', '/')
     while p.startswith('./'):
         p = p[2:]
     name = PurePosixPath(p).name
     low = p.lower()
-    if name not in SAFE_ENV_TEMPLATE_NAMES and (
+    # The old `.env.demo` was a sanitized template before being renamed to the
+    # unambiguous `.env.demo.example`. Keep that one legacy filename scan-able
+    # in history, but forbid it in the current tree.
+    historical_template = history and name == '.env.demo'
+    if name not in SAFE_ENV_TEMPLATE_NAMES and not historical_template and (
         name == '.env'
         or name.startswith('.env.')
         or name.endswith('.env')
@@ -230,7 +234,7 @@ def scan_history() -> list[tuple[str, str]]:
             continue
         if line.startswith('+++ b/'):
             path = line[6:].strip()
-            why = forbidden_path(path)
+            why = forbidden_path(path, history=True)
             if why:
                 findings.add((f'{commit}:{path}', why))
             continue

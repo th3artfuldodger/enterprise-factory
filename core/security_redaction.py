@@ -61,17 +61,29 @@ def _redact_log_arg(value: Any) -> Any:
 
 
 def _redact_record(record: logging.LogRecord) -> None:
-    try:
-        rendered = record.getMessage()
-        record.msg = redact_text(rendered)
-        record.args = ()
-    except Exception:
+    # Uvicorn's AccessFormatter does not format record.msg normally: it unpacks
+    # record.args into (client_addr, method, full_path, http_version, status_code).
+    # Clearing args after eager rendering breaks every access-log line. Preserve
+    # that structured tuple while still redacting each value, especially query
+    # strings that may contain tokens.
+    if record.name == "uvicorn.access" and isinstance(record.args, tuple) and len(record.args) >= 5:
         try:
             record.msg = redact_text(record.msg)
-            if record.args:
-                record.args = _redact_log_arg(record.args)
+            record.args = _redact_log_arg(record.args)
         except Exception:
             pass
+    else:
+        try:
+            rendered = record.getMessage()
+            record.msg = redact_text(rendered)
+            record.args = ()
+        except Exception:
+            try:
+                record.msg = redact_text(record.msg)
+                if record.args:
+                    record.args = _redact_log_arg(record.args)
+            except Exception:
+                pass
     if record.exc_info:
         try:
             # Format once, redact the exception text, then clear exc_info so a later

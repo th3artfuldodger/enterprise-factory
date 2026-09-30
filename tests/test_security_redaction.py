@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from core.security_redaction import install_secret_redaction, redact_structure, redact_text
+from core.security_redaction import _redact_record, install_secret_redaction, redact_structure, redact_text
 
 
 def test_redact_text_masks_common_secret_shapes() -> None:
@@ -72,3 +72,27 @@ def test_exception_traceback_is_redacted(caplog) -> None:
             logger.exception("provider request failed")
     assert token not in caplog.text
     assert "<redacted>" in caplog.text
+
+
+def test_uvicorn_access_record_preserves_formatter_args_and_redacts_query_secret() -> None:
+    from uvicorn.logging import AccessFormatter
+
+    token = "abc123456789"
+    record = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=("127.0.0.1:12345", "GET", f"/api/test?token={token}", "1.1", 200),
+        exc_info=None,
+    )
+    _redact_record(record)
+
+    assert isinstance(record.args, tuple)
+    assert len(record.args) == 5
+    rendered = AccessFormatter('%(client_addr)s "%(request_line)s" %(status_code)s').format(record)
+    assert token not in rendered
+    assert "<redacted>" in rendered
+    assert "GET" in rendered
+    assert "200" in rendered

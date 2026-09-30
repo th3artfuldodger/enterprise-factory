@@ -23,8 +23,18 @@ BACKEND_PORT="${BACKEND_PORT:-8081}"
 # example to a Tailscale address) when remote access is intentionally needed.
 AIFACTORY_BIND_ADDRESS="${AIFACTORY_BIND_ADDRESS:-127.0.0.1}"
 # Optional second bind (for example the host's Tailscale IP). Leave unset to
-# keep the service loopback-only.
+# keep the service loopback-only. A host-local value may be persisted OUTSIDE
+# Git at ~/aicom-data/config/remote_bind_address.
 AIFACTORY_REMOTE_BIND_ADDRESS="${AIFACTORY_REMOTE_BIND_ADDRESS:-}"
+if [[ -z "${AIFACTORY_REMOTE_BIND_ADDRESS}" && -f "${DATA_DIR}/config/remote_bind_address" ]]; then
+    _remote_bind="$(tr -d '[:space:]' < "${DATA_DIR}/config/remote_bind_address")"
+    if [[ "${_remote_bind}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ || "${_remote_bind}" == *:* ]]; then
+        AIFACTORY_REMOTE_BIND_ADDRESS="${_remote_bind}"
+    else
+        echo "Ignoring invalid host-local remote bind address" >&2
+    fi
+    unset _remote_bind
+fi
 
 # ── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -45,6 +55,7 @@ if [[ "${1:-}" == "--help" ]]; then
     echo "  BACKEND_PORT             — Host port for backend  (default: 8081)"
     echo "  AIFACTORY_BIND_ADDRESS          — Primary host bind address (default: 127.0.0.1)"
     echo "  AIFACTORY_REMOTE_BIND_ADDRESS   — Optional second host bind, e.g. a Tailscale IP"
+    echo "  Host-local fallback: ~/aicom-data/config/remote_bind_address (never committed)"
     echo "  AIFACTORY_AUTONOMOUS_PIPELINE  — First run with this data dir: 1 = autonomous, 0 = ideas only (default, skips prompt)"
     exit 0
 fi
@@ -62,7 +73,31 @@ fi
 # ── Step 2: Ensure data directory ──────────────────────────────────────────
 mkdir -p "${DATA_DIR}"
 mkdir -p "${DATA_DIR}/config"
+mkdir -p "${DATA_DIR}/secrets/llm"
+chmod 700 "${DATA_DIR}" "${DATA_DIR}/config" "${DATA_DIR}/secrets" "${DATA_DIR}/secrets/llm" 2>/dev/null || true
 echo -e "${YELLOW}Data directory: ${DATA_DIR}${NC}"
+
+# Never pass provider credentials through `docker run -e`, where they are
+# recoverable through container metadata. If an operator supplies a provider
+# key to this launcher, migrate it into the host-local secret store instead.
+_persist_provider_secret() {
+    local var_name="$1"
+    local file_name="$2"
+    local value="${!var_name:-}"
+    if [[ -n "$value" ]]; then
+        umask 077
+        printf '%s' "$value" > "${DATA_DIR}/secrets/llm/${file_name}"
+        chmod 600 "${DATA_DIR}/secrets/llm/${file_name}" 2>/dev/null || true
+        unset "$var_name"
+        echo "✓ Stored ${var_name} in the host-local secret vault (not container metadata)"
+    fi
+}
+_persist_provider_secret DEEPSEEK_API_KEY deepseek_api_key
+_persist_provider_secret OPENROUTER_API_KEY openrouter_api_key
+_persist_provider_secret ANTHROPIC_API_KEY anthropic_api_key
+_persist_provider_secret GROQ_API_KEY groq_api_key
+_persist_provider_secret TOGETHER_API_KEY together_api_key
+unset -f _persist_provider_secret
 
 # First launch: choose autonomous pipeline vs ideas-only (writes marker inside container)
 FIRST_MARK="${DATA_DIR}/config/first_run_pipeline_mode.done"
@@ -122,10 +157,6 @@ docker run -d \
     -e "AIFACTORY_AUTONOMOUS_PIPELINE=${AIFACTORY_AUTONOMOUS_PIPELINE:-}" \
     -e "AIFACTORY_CONFIG_YAML=/app/data/config/admin_config_overlay.yaml" \
     -e "AIFACTORY_CONFIG_FRAGMENTS_DIR=/app/config/fragments" \
-    ${JWT_SECRET_KEY+-e "JWT_SECRET_KEY=${JWT_SECRET_KEY}"} \
-    ${DEEPSEEK_API_KEY+-e "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}"} \
-    ${TOGETHER_API_KEY+-e "TOGETHER_API_KEY=${TOGETHER_API_KEY}"} \
-    ${GROQ_API_KEY+-e "GROQ_API_KEY=${GROQ_API_KEY}"} \
     "${IMAGE_NAME}"
 
 echo ""

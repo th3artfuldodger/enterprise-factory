@@ -6,7 +6,7 @@ This project treats the 20-point pre-launch checklist as enforced architecture, 
 2. **Purge Git secrets** — local hooks and CI scan staged content, tracked files, and Git history; no live secret was found in the current history.
 3. **Use only public DB keys client-side** — the browser has no direct database client and receives no database credentials.
 4. **Enable row-level protection** — private records are accessed only through authenticated server routes scoped to the current admin/customer/workspace. A future direct-client database integration must add native RLS before launch.
-5. **Encrypt sensitive data** — application secrets use the Fernet secrets vault; private runtime files are owner-only.
+5. **Protect sensitive data at rest** — application secrets use the Fernet secrets vault; support bearer tokens are one-way hashed; private runtime files are owner-only.
 6. **Enforce server-side auth** — admin/customer authorization is checked by FastAPI dependencies or explicit WebSocket/auth handlers.
 7. **Lock record access** — internal product/security/sandbox data is admin-only and customer data is scoped by the authenticated customer id.
 8. **Block field tampering** — shared request models reject unknown fields with Pydantic `extra="forbid"`.

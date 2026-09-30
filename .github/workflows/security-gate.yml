@@ -42,6 +42,7 @@ jobs:
           tests/test_run_script_security.py
           tests/test_security_authz_invariants.py
           tests/test_launch_security_checklist.py
+          tests/test_support_session_security.py
       - name: Reject malformed diffs
         run: git diff --check
 

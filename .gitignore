@@ -4,12 +4,12 @@
 *.env
 *.env.*
 !.env.example
-!.env.demo
+!.env.demo.example
 !.env.vps.example
 !*.env.example
 !**/*.env.example
-!*.env.demo
-!**/*.env.demo
+!*.env.demo.example
+!**/*.env.demo.example
 !*.env.vps.example
 !**/*.env.vps.example
 .npmrc

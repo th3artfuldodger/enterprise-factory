@@ -16,6 +16,7 @@ def _gate():
 def test_forbidden_runtime_paths_and_live_env() -> None:
     gate = _gate()
     assert gate.forbidden_path(".env")
+    assert gate.forbidden_path(".env.demo")
     assert gate.forbidden_path("production.env")
     assert gate.forbidden_path(".npmrc")
     assert gate.forbidden_path("credentials.json")
@@ -24,6 +25,8 @@ def test_forbidden_runtime_paths_and_live_env() -> None:
     assert gate.forbidden_path("notes.sqlite3")
     assert gate.forbidden_path("thing.before-security")
     assert gate.forbidden_path(".env.example") is None
+    assert gate.forbidden_path(".env.demo.example") is None
+    assert gate.forbidden_path(".env.demo", history=True) is None
     assert gate.forbidden_path("deploy/hub-payment.env.example") is None
     assert gate.forbidden_path("deploy/hub-zk.env.example") is None
     assert gate.forbidden_path("deploy/hub-payment.env.example") is None
