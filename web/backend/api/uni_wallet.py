@@ -318,13 +318,12 @@ async def request_withdraw(body: UniWithdrawRequest, customer: dict = Depends(re
 
 
 @router.get("/treasury/audit")
-async def treasury_audit_latest():
+async def treasury_audit_latest(_admin: dict = Depends(require_admin_with_rbac)):
     """Latest reserve snapshot (strictly read-only).
 
-    Never writes — if no snapshot exists yet, return a placeholder so an
-    unauthenticated client cannot use this endpoint to flood ``uni_treasury_audit``
-    or to capture an env-overridden ``usdt_observed_on_chain`` into the audit
-    timeline. Snapshot creation lives behind admin auth at
+    Never writes. Access is admin-only because reserve totals are operational
+    financial data. If no snapshot exists yet, return a placeholder; snapshot
+    creation lives behind admin auth at
     ``POST /api/uni/treasury/audit/snapshot`` and the periodic ``uni_scheduler``.
     """
     _require_uni()

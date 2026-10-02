@@ -328,25 +328,28 @@ class TaskOrchestrator:
                         first_agent, first_state = "analyst", "MARKET_RESEARCHED"
                     # Prepend so new products are not starved behind a huge historical backlog
                     # (task_queue is scanned in list order; SQLite loads tasks by created_at ASC).
-                    task_queue.insert(
-                        0,
-                        {
-                            "id": f"task-{uuid.uuid4().hex[:12]}",
+                    initial_task = {
+                        "id": f"task-{uuid.uuid4().hex[:12]}",
+                        "product_id": pid,
+                        "agent_type": first_agent,
+                        "state": first_state,
+                        "status": "pending",
+                        "retry_count": 0,
+                        "max_retries": 3,
+                        "input_data": {
                             "product_id": pid,
-                            "agent_type": first_agent,
-                            "state": first_state,
-                            "status": "pending",
-                            "retry_count": 0,
-                            "max_retries": 3,
-                            "input_data": {
-                                "product_id": pid,
-                                "idea": product.get("idea", ""),
-                                "admin_instructions": product.get("admin_instructions", ""),
-                            },
-                            "created_at": now,
-                            "priority": 0,
+                            "idea": product.get("idea", ""),
+                            "admin_instructions": product.get("admin_instructions", ""),
                         },
-                    )
+                        "created_at": now,
+                        "priority": 0,
+                    }
+                    try:
+                        from web.backend.services.factory_staffing import stamp_pipeline_task
+                        initial_task = stamp_pipeline_task(product, initial_task)
+                    except Exception:
+                        pass
+                    task_queue.insert(0, initial_task)
                     changed = True
         return changed
 
@@ -377,6 +380,21 @@ class TaskOrchestrator:
                 if not other_running:
                     task["status"] = "running"
                     task["started_at"] = now
+                    try:
+                        from web.backend.services.factory_event_journal import emit_factory_event
+                        inp = task.get("input_data") or {}
+                        emit_factory_event(
+                            "task_started", product_id=pid,
+                            source=str(inp.get("factory_manager_id") or "factory_router"),
+                            target=str(task.get("assigned_to") or task.get("agent_type") or ""),
+                            task_id=str(task.get("id") or ""), status="running",
+                            ecosystem=str(inp.get("factory_ecosystem") or "general"),
+                            manager_id=str(inp.get("factory_manager_id") or "") or None,
+                            summary=f"Started {task.get('agent_type')} work",
+                            metadata={"state": task.get("state"), "staffing_mode": inp.get("factory_staffing_mode")},
+                        )
+                    except Exception:
+                        pass
                     running_total += 1
                     changed = True
         return changed

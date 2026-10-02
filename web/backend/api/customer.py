@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -18,6 +19,10 @@ from fastapi.responses import FileResponse
 from core.pipeline_state_writer import append_product_to_pipeline_state
 from web.backend.schemas.api_requests import (
     CustomerCreateRunRequest,
+    CustomerFactoryMissionRequest,
+    CustomerFundingRequest,
+    CustomerPersonnelRequest,
+    CustomerManagerDelegationRequest,
     CustomerLoginRequest,
     CustomerRegisterRequest,
     DemoNoteCreateRequest,
@@ -196,12 +201,14 @@ async def login(body: CustomerLoginRequest, request: Request, response: Response
 
 @router.get("/me")
 async def me(payload: dict = Depends(_get_token_payload)):
+    from web.backend.services.tenant_workspaces import customer_workspace_id
     profile = commerce.get_customer(payload["sub"]) or {}
     usage = commerce.get_monthly_run_usage(payload["sub"])
     return {
         "id": payload["sub"],
         "email": payload.get("email"),
         "plan": profile.get("plan", "free"),
+        "workspace_id": customer_workspace_id(payload["sub"]),
         "usage": usage,
     }
 
@@ -384,6 +391,234 @@ async def my_referral_dashboard(payload: dict = Depends(_get_token_payload)):
     )
 
 
+
+@router.get("/factory")
+async def customer_factory(payload: dict = Depends(_get_token_payload)):
+    """Return this customer's isolated, game-facing Factory state."""
+    from web.backend.services.empire_architecture import architecture_summary
+    from web.backend.services.funding_utility import funding_status_summary
+    from web.backend.services.tenant_workspaces import (
+        customer_workspace_id,
+        read_customer_pipeline_state,
+    )
+
+    customer_id = str(payload["sub"])
+    state = read_customer_pipeline_state(customer_id)
+    products = list((state.get("products") or {}).values())
+    tasks = list(state.get("task_queue") or [])
+    active_by_product: dict[str, list[dict]] = {}
+    for task in tasks:
+        pid = str(task.get("product_id") or "")
+        if not pid:
+            continue
+        if str(task.get("status") or "").lower() in {"pending", "running", "blocked"}:
+            active_by_product.setdefault(pid, []).append(task)
+
+    project_nodes = []
+    for product in products:
+        pid = str(product.get("id") or "")
+        live = active_by_product.get(pid) or []
+        project_nodes.append(
+            {
+                "id": f"product:{pid}",
+                "kind": "product",
+                "product_id": pid,
+                "label": str(product.get("idea") or pid)[:120],
+                "state": product.get("state"),
+                "department": product.get("empire_department") or product.get("category") or "general",
+                "active_task_count": len(live),
+                "active_tasks": [
+                    {
+                        "id": t.get("id"),
+                        "agent_type": t.get("agent_type"),
+                        "assigned_to": t.get("assigned_to"),
+                        "status": t.get("status"),
+                    }
+                    for t in live[:20]
+                ],
+                "decision_ready": bool(product.get("empire_decision_package")),
+                "manager_review": product.get("empire_manager_review"),
+                "primary_risk": product.get("empire_primary_risk"),
+                "ultron_audit": product.get("ultron_audit"),
+                "decision_package": product.get("empire_decision_package"),
+            }
+        )
+
+    ws = customer_workspace_id(customer_id)
+    from web.backend.services.customer_workforce import list_customer_personnel
+    workforce = list_customer_personnel(customer_id)
+    return {
+        "workspace_id": ws,
+        "tenant_isolated": True,
+        "organization": architecture_summary(),
+        "projects": project_nodes,
+        "task_count": len(tasks),
+        "workforce": workforce,
+        "funding": funding_status_summary(workspace_id=ws),
+        "customer_permissions": {
+            "may_create_projects": True,
+            "may_create_ai_personnel": True,
+            "may_delegate_tasks": True,
+            "may_request_funding": True,
+            "may_authorize_funding": False,
+            "may_move_money": False,
+        },
+    }
+
+
+@router.get("/factory/reports/{product_id}.pdf")
+async def customer_factory_report_pdf(
+    product_id: str,
+    payload: dict = Depends(_get_token_payload),
+):
+    from web.backend.services.empire_reports import build_empire_report, render_empire_report_pdf
+    from web.backend.services.funding_utility import list_requests
+    from web.backend.services.tenant_workspaces import customer_workspace_id, read_customer_pipeline_state
+
+    customer_id = str(payload["sub"])
+    state = read_customer_pipeline_state(customer_id)
+    product = (state.get("products") or {}).get(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Project not found")
+    ws = customer_workspace_id(customer_id)
+    funding = [r for r in list_requests(workspace_id=ws, limit=500) if r.get("product_id") == product_id]
+    report = build_empire_report(product, funding_requests=funding)
+    return Response(
+        content=render_empire_report_pdf(report),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="empire-{product_id}.pdf"'},
+    )
+
+
+@router.post("/factory/personnel")
+async def customer_create_personnel(
+    body: CustomerPersonnelRequest,
+    payload: dict = Depends(_get_token_payload),
+):
+    from web.backend.services.customer_workforce import create_customer_personnel
+    try:
+        return create_customer_personnel(
+            str(payload["sub"]),
+            body.description,
+            role_class=body.role_class,
+            label=body.label,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory/managers/{manager_id}/delegate")
+async def customer_manager_delegate(
+    manager_id: str,
+    body: CustomerManagerDelegationRequest,
+    payload: dict = Depends(_get_token_payload),
+):
+    from web.backend.services.customer_workforce import delegate_customer_manager_task
+    try:
+        return delegate_customer_manager_task(
+            str(payload["sub"]),
+            manager_id=manager_id,
+            worker_id=body.worker_id,
+            product_id=body.product_id,
+            directive=body.directive,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory/mission")
+async def customer_factory_mission(
+    body: CustomerFactoryMissionRequest,
+    payload: dict = Depends(_get_token_payload),
+):
+    """Turn a customer prompt into a five-lens department mission + management reviews."""
+    from web.backend.services.empire_missions import create_customer_mission
+    from web.backend.services.prompt_safety import (
+        prepare_untrusted_plain_text,
+        rejection_reason_if_blocked,
+    )
+
+    customer_id = str(payload["sub"])
+    profile = commerce.get_customer(customer_id)
+    if not profile:
+        raise HTTPException(status_code=401, detail="Customer not found")
+    plan = str(profile.get("plan") or "free").lower()
+    if plan == "free":
+        quota = commerce.consume_monthly_run(customer_id, limit=3)
+        if not quota.get("allowed"):
+            raise HTTPException(
+                status_code=402,
+                detail="Free tier limit reached (3 pipeline runs/month). Upgrade required.",
+            )
+
+    raw = (body.prompt or "").strip()
+    blocked = rejection_reason_if_blocked(raw, context="customer_empire_mission")
+    if blocked:
+        raise HTTPException(status_code=400, detail=blocked)
+    prompt = prepare_untrusted_plain_text(raw, max_len=8000)
+    try:
+        result = create_customer_mission(customer_id, prompt)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+    return {**result, "plan": plan, "tenant_isolated": True}
+
+
+@router.post("/factory/funding/scout/{product_id}")
+async def customer_factory_funding_scout(
+    product_id: str,
+    payload: dict = Depends(_get_token_payload),
+):
+    from web.backend.services.funding_scouts import discover_funding_opportunities
+    from web.backend.services.tenant_workspaces import customer_workspace_id, read_customer_pipeline_state
+
+    customer_id = str(payload["sub"])
+    state = read_customer_pipeline_state(customer_id)
+    product = (state.get("products") or {}).get(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return await asyncio.to_thread(
+        discover_funding_opportunities,
+        workspace_id=customer_workspace_id(customer_id),
+        project_idea=str(product.get("idea") or ""),
+        product_id=product_id,
+    )
+
+
+@router.post("/factory/funding/request")
+async def customer_factory_funding_request(
+    body: CustomerFundingRequest,
+    payload: dict = Depends(_get_token_payload),
+):
+    """Factory-side funding request only. Customers/AI do not authorize capital here."""
+    from web.backend.services.funding_utility import submit_funding_request
+    from web.backend.services.tenant_workspaces import customer_workspace_id
+
+    customer_id = str(payload["sub"])
+    ws = customer_workspace_id(customer_id)
+    try:
+        request = submit_funding_request(
+            workspace_id=ws,
+            product_id=body.product_id,
+            department=body.department,
+            requested_by=f"customer-factory:{customer_id}",
+            requested_by_label="Customer Factory",
+            amount_usd=body.amount_usd,
+            purpose=body.purpose,
+            source_preference=body.source_preference,
+            restrictions=body.restrictions,
+            # A client cannot self-declare a preapproved budget. That flag is
+            # reserved for Funding Utility/owner-side policy.
+            preapproved_budget=False,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+    return {
+        "request": request,
+        "authorization": "pending_funding_utility",
+        "customer_may_authorize": False,
+    }
+
+
 @router.post("/pipeline/run")
 async def customer_pipeline_run(body: CustomerCreateRunRequest, payload: dict = Depends(_get_token_payload)):
     customer_id = payload["sub"]
@@ -440,9 +675,22 @@ async def customer_pipeline_run(body: CustomerCreateRunRequest, payload: dict = 
             "watermark_policy": "on" if plan == "free" else "off",
         },
     }
-    if not append_product_to_pipeline_state(product):
-        raise HTTPException(status_code=503, detail="Pipeline store unavailable. Try again shortly.")
-    return {"product_id": product_id, "state": "IDEA_RECEIVED", "plan": plan}
+    from web.backend.services.tenant_workspaces import (
+        customer_workspace_id,
+        write_customer_product,
+    )
+    try:
+        stored = write_customer_product(customer_id, product)
+    except Exception as exc:
+        logger.exception("Tenant pipeline enqueue failed for customer=%s", customer_id)
+        raise HTTPException(status_code=503, detail="Pipeline store unavailable. Try again shortly.") from exc
+    return {
+        "product_id": product_id,
+        "state": "IDEA_RECEIVED",
+        "plan": plan,
+        "workspace_id": customer_workspace_id(customer_id),
+        "tenant_isolated": True,
+    }
 
 
 @router.get("/orders/{order_id}/download")

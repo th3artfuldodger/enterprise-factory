@@ -58,15 +58,18 @@ class LocalOllamaProvider(LLMProvider):
         start_time = time.time()
 
         try:
+            configured_max = int((self.config.get("capabilities") or {}).get("max_tokens") or cfg.max_tokens)
+            max_tokens = max(1, min(int(cfg.max_tokens), configured_max))
             payload = {
                 "model": self.model,
                 "prompt": prompt,
                 "stream": False,
+                **({"format": "json"} if cfg.json_mode else {}),
                 "options": {
                     "temperature": cfg.temperature,
                     "top_p": cfg.top_p,
                     "top_k": cfg.top_k,
-                    "num_predict": cfg.max_tokens,
+                    "num_predict": max_tokens,
                     "repeat_penalty": cfg.repetition_penalty,
                     "stop": cfg.stop_sequences if cfg.stop_sequences else None,
                 },
@@ -105,15 +108,18 @@ class LocalOllamaProvider(LLMProvider):
         total_tokens = 0
 
         try:
+            configured_max = int((self.config.get("capabilities") or {}).get("max_tokens") or cfg.max_tokens)
+            max_tokens = max(1, min(int(cfg.max_tokens), configured_max))
             payload = {
                 "model": self.model,
                 "prompt": prompt,
                 "stream": True,
+                **({"format": "json"} if cfg.json_mode else {}),
                 "options": {
                     "temperature": cfg.temperature,
                     "top_p": cfg.top_p,
                     "top_k": cfg.top_k,
-                    "num_predict": cfg.max_tokens,
+                    "num_predict": max_tokens,
                     "repeat_penalty": cfg.repetition_penalty,
                 },
             }

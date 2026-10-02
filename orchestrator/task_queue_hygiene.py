@@ -50,6 +50,17 @@ def _is_repair_agent_state(agent: str, state: str) -> bool:
     return False
 
 
+def _is_empire_mission_task(task: dict) -> bool:
+    """Empire missions intentionally keep multiple same-product tasks queued in sequence."""
+    agent = str(task.get("agent_type") or "")
+    inp = task.get("input_data") or {}
+    return bool(
+        inp.get("empire_research_lens")
+        or inp.get("empire_department")
+        or agent in {"__department_manager_review__", "__ultron_review__"}
+    )
+
+
 def state_rank(state: str | None) -> int:
     return _STATE_RANK.get(str(state or "").upper(), -1)
 
@@ -396,6 +407,8 @@ def unstick_blocked_tasks(
             if st not in ("pending", "running"):
                 continue
             key = (str(t.get("agent_type") or "").lower(), str(t.get("state") or "").upper())
+            if _is_empire_mission_task(t):
+                continue
             if key in completed_keys:
                 cancel_task(t, now, reason="queue_hygiene: duplicate active after stage completed")
                 changed = True
@@ -447,6 +460,8 @@ def enforce_task_queue_hygiene(
     by_product: dict[str, list[dict]] = {}
     for task in task_queue:
         if str(task.get("status") or "").lower() not in ("pending", "running"):
+            continue
+        if bool((task.get("input_data") or {}).get("factory_personnel_assignment")) or _is_empire_mission_task(task):
             continue
         pid = task.get("product_id")
         if not pid:

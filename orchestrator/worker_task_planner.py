@@ -167,4 +167,9 @@ class NextTaskPlanner:
                     task["input_data"]["test_output"] = lb.get("test_output")
         if agent_type == "methodologist":
             task["input_data"]["stage"] = "post_spec"
+        try:
+            from web.backend.services.factory_staffing import stamp_pipeline_task
+            task = stamp_pipeline_task(product, task)
+        except Exception:
+            pass
         return task

@@ -563,8 +563,8 @@ ok "$_nports published ports free (all >= 1024 — nothing here needs root)"
 #  2. SECRETS
 # ══════════════════════════════════════════════════════════════════════════
 if [[ ! -f .env ]]; then
-  if [[ -f .env.demo ]]; then cp .env.demo .env; ok "Created .env from .env.demo"
-  else warn "No .env and no .env.demo — creating an empty .env"; : > .env; fi
+  if [[ -f .env.demo.example ]]; then cp .env.demo.example .env; ok "Created .env from .env.demo.example"
+  else warn "No .env and no .env.demo.example — creating an empty .env"; : > .env; fi
 fi
 
 FIRST_MINT=0

@@ -210,6 +210,18 @@ run_director_worker() {
   echo "Director AI Worker started (PID: $DIRECTOR_PID)"
 }
 
+run_tenant_worker_supervisor() {
+  if [[ "${AIFACTORY_TENANT_WORKERS_ENABLED:-1}" != "1" ]]; then
+    echo "Tenant worker supervisor disabled (AIFACTORY_TENANT_WORKERS_ENABLED=${AIFACTORY_TENANT_WORKERS_ENABLED:-0})"
+    return
+  fi
+  echo "Starting isolated customer Factory worker supervisor..."
+  cd /app
+  python3 -m tenant_worker_supervisor &
+  TENANT_SUPERVISOR_PID=$!
+  echo "Tenant worker supervisor started (PID: $TENANT_SUPERVISOR_PID)"
+}
+
 case "${ROLE}" in
   pipeline-worker)
     cd /app
@@ -228,6 +240,7 @@ case "${ROLE}" in
       run_pipeline_worker
       run_director_worker
     fi
+    run_tenant_worker_supervisor
     ;;
   *)
     echo "FATAL: unknown AICOM_ROLE=${ROLE} (expected one of: all|api|frontend|pipeline-worker|director-worker)"

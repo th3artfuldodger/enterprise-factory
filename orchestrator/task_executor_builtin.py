@@ -85,6 +85,118 @@ async def run_builtin_task(
         logger.info("Landing mini-spec ready for %s (preset=%s)", pid, preset.get("id"))
         return True
 
+    if agent_type == "__department_manager_review__":
+        import json
+        # SQL workers intentionally load only runnable tasks for efficiency. Empire manager
+        # review is different: it must see the completed research rows that fed this stage.
+        review_tasks = task_queue
+        persistence = getattr(host, "_persistence", None)
+        store = getattr(persistence, "_async_store", None)
+        get_all_tasks = getattr(store, "get_all_tasks", None)
+        if callable(get_all_tasks):
+            try:
+                persisted_tasks = await get_all_tasks()
+                if isinstance(persisted_tasks, list):
+                    review_tasks = persisted_tasks
+            except Exception:
+                logger.debug("Empire manager could not load completed task history", exc_info=True)
+        research: dict[str, dict] = {}
+        for prior in review_tasks:
+            if prior.get("product_id") != pid or str(prior.get("status") or "").lower() != "completed":
+                continue
+            inp = prior.get("input_data") or {}
+            lens = str(inp.get("empire_research_lens") or "")
+            if not lens:
+                continue
+            out = prior.get("output_data") or {}
+            if isinstance(out, dict) and "factory_assignment_result" in out:
+                out = out.get("factory_assignment_result") or {}
+            evidence = (out.get("evidence") if isinstance(out, dict) else None) or []
+            if not evidence and isinstance(out, dict):
+                market_research = out.get("market_research") or {}
+                nested_evidence = market_research.get("evidence") if isinstance(market_research, dict) else None
+                if isinstance(nested_evidence, dict):
+                    evidence = nested_evidence.get("sources") or []
+                elif nested_evidence:
+                    evidence = nested_evidence
+            research[lens] = {
+                "agent_id": inp.get("personnel_id") or prior.get("assigned_to"),
+                "directive": inp.get("assignment_directive"),
+                "result": out,
+                "evidence": evidence if isinstance(evidence, list) else [evidence],
+            }
+        required = {"need", "money", "competition", "ai_advantage", "feasibility"}
+        missing = sorted(required - set(research))
+        evidence_missing = sorted(
+            lens for lens in required
+            if lens in research and not (research[lens].get("evidence") or [])
+        )
+        coverage_confidence = max(0.0, 100.0 - len(missing) * 20.0)
+        evidence_confidence = max(0.0, 100.0 - len(evidence_missing) * 20.0)
+        confidence = round(min(coverage_confidence, evidence_confidence), 1)
+        primary_risk = {
+            "risk_score_0_100": round(max(30.0 + len(missing) * 14.0, 100.0 - confidence), 1),
+            "missing_research_lenses": missing,
+            "lenses_without_evidence": evidence_missing,
+        }
+        challenge_notes = [f"Missing research lens: {name}" for name in missing]
+        challenge_notes += [f"Research lens has no supporting evidence: {name}" for name in evidence_missing]
+        if not challenge_notes:
+            challenge_notes = ["All five research lenses reported with supporting evidence; package ready for Ultron review."]
+        review = {
+            "manager_id": (task.get("input_data") or {}).get("manager_id") or task.get("assigned_to"),
+            "confidence": confidence,
+            "challenge_notes": challenge_notes,
+            "reviewed_at": time.time(),
+        }
+        product["empire_research_packet"] = research
+        product["empire_primary_risk"] = primary_risk
+        product["empire_manager_review"] = review
+        product["updated_at"] = time.time()
+        task["status"] = "completed"
+        task["completed_at"] = time.time()
+        task["output_data"] = {"research_packet": research, "primary_risk": primary_risk, "manager_review": review}
+        task["output_summary"] = f"Department manager review complete; confidence={confidence:.0f}"
+        return True
+
+    if agent_type == "__ultron_review__":
+        from web.backend.services.ultron_oversight import audit_package, consolidate_decision
+        inp = task.get("input_data") or {}
+        research_packet = dict(product.get("empire_research_packet") or {})
+        primary_risk = dict(product.get("empire_primary_risk") or {})
+        manager_review = dict(product.get("empire_manager_review") or {})
+        funding = None
+        funding_request_id = str(inp.get("funding_request_id") or "")
+        if funding_request_id:
+            try:
+                from web.backend.services.funding_utility import get_request
+                funding = get_request(funding_request_id)
+            except Exception:
+                funding = None
+        audit = audit_package(
+            workspace_id=str(product.get("workspace_id") or inp.get("workspace_id") or "default"),
+            product_id=pid,
+            department=str(inp.get("department") or product.get("empire_department") or "general"),
+            research_packet=research_packet,
+            manager_review=manager_review,
+            funding_request=funding,
+        )
+        package = consolidate_decision(
+            research_packet=research_packet,
+            primary_risk=primary_risk,
+            manager_review=manager_review,
+            ultron_audit=audit,
+            funding_review=funding,
+        )
+        product["ultron_audit"] = audit
+        product["empire_decision_package"] = package
+        product["updated_at"] = time.time()
+        task["status"] = "completed"
+        task["completed_at"] = time.time()
+        task["output_data"] = {"audit": audit, "consolidated": package}
+        task["output_summary"] = f"Ultron review: {audit.get('recommendation')}"
+        return True
+
     # Runtime test stage between developer and hardening.
     if agent_type == "__runtime_test__":
         runtime_result = host._run_runtime_tests(pid, task_queue)

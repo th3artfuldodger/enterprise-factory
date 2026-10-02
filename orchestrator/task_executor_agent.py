@@ -845,6 +845,41 @@ async def run_agent_task(
             task["output_data"] = output.data
             task["metrics"] = output.metrics
             task["output_summary"] = str(output.data)[:200]
+            try:
+                from web.backend.services.factory_event_journal import emit_factory_event
+                inp = task.get("input_data") or {}
+                emit_factory_event(
+                    "task_completed", product_id=pid,
+                    source=str(task.get("assigned_to") or agent_type),
+                    target=str(inp.get("factory_manager_id") or "" ) or None,
+                    task_id=task_id, status="completed",
+                    ecosystem=str(inp.get("factory_ecosystem") or "general"),
+                    manager_id=str(inp.get("factory_manager_id") or "") or None,
+                    summary=f"{agent_type} completed {task.get('state') or ''}",
+                    metadata={"agent_type": agent_type, "state": task.get("state")},
+                )
+            except Exception:
+                pass
+
+            # Factory Floor personnel assignments are real agent work, but they are
+            # intentionally side assignments: completing one must not advance the
+            # product's canonical pipeline state or create a sequential next task.
+            if bool((task.get("input_data") or {}).get("factory_personnel_assignment")):
+                task["personnel_assignment_completed"] = True
+                raw_result = task.get("output_data")
+                task["output_data"] = {
+                    "factory_assignment_result": raw_result,
+                    "factory_report_status": "awaiting_manager",
+                    "factory_report_ready_at": time.time(),
+                }
+                logger.info(
+                    "Factory personnel assignment completed: %s by %s for %s; awaiting manager review",
+                    task_id,
+                    (task.get("input_data") or {}).get("personnel_id") or task.get("assigned_to") or agent_type,
+                    pid,
+                )
+                return
+
             if pid in products:
                 host.peer_review_engine.register(
                     products[pid], agent_type, output.data if isinstance(output.data, dict) else {}
@@ -2029,6 +2064,21 @@ async def run_agent_task(
                     )
                     if not exists:
                         task_queue.append(next_task)
+                        try:
+                            from web.backend.services.factory_event_journal import emit_factory_event
+                            ninp = next_task.get("input_data") or {}
+                            emit_factory_event(
+                                "handoff_created", product_id=pid,
+                                source=str(task.get("assigned_to") or agent_type),
+                                target=str(next_task.get("assigned_to") or next_task.get("agent_type") or ""),
+                                task_id=str(next_task.get("id") or ""), status="pending",
+                                ecosystem=str(ninp.get("factory_ecosystem") or "general"),
+                                manager_id=str(ninp.get("factory_manager_id") or "") or None,
+                                summary=f"{agent_type} → {next_task.get('agent_type')}",
+                                metadata={"from_state": prev_state, "to_state": next_task.get("state")},
+                            )
+                        except Exception:
+                            pass
                         host._audit_agent_handoff(
                             product_id=pid,
                             from_agent=agent_type,

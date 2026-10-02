@@ -140,6 +140,36 @@ class CustomerCreateRunRequest(StrictRequestModel):
         return v.strip()
 
 
+class CustomerFactoryMissionRequest(StrictRequestModel):
+    prompt: str = Field(..., min_length=8, max_length=8000)
+
+    @field_validator("prompt")
+    @classmethod
+    def strip_prompt(cls, v: str) -> str:
+        return v.strip()
+
+
+class CustomerFundingRequest(StrictRequestModel):
+    product_id: Optional[str] = Field(None, max_length=128)
+    department: str = Field(..., min_length=1, max_length=80)
+    amount_usd: float = Field(..., gt=0, le=10_000_000)
+    purpose: str = Field(..., min_length=3, max_length=4000)
+    source_preference: Optional[str] = Field(None, max_length=240)
+    restrictions: list[str] = Field(default_factory=list, max_length=20)
+
+
+class CustomerPersonnelRequest(StrictRequestModel):
+    description: str = Field(..., min_length=3, max_length=1000)
+    role_class: Optional[Literal["worker", "manager"]] = None
+    label: Optional[str] = Field(None, max_length=80)
+
+
+class CustomerManagerDelegationRequest(StrictRequestModel):
+    worker_id: str = Field(..., min_length=1, max_length=128)
+    product_id: str = Field(..., min_length=1, max_length=128)
+    directive: str = Field(..., min_length=1, max_length=8000)
+
+
 class DemoNoteCreateRequest(StrictRequestModel):
     title: str = Field(..., min_length=1, max_length=500)
     body: str = Field("", max_length=8000)

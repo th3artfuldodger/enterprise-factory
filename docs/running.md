@@ -43,7 +43,7 @@ Every action (`up` / `logs` / `down`) runs against **both** files.
 
 1. **Resolve root & `cd`**, `set -euo pipefail`.
 2. **Preflight** — hard-fails unless all three pass: `docker` present, `docker compose version` (Compose v2), `docker info` (daemon reachable). Prints `✓ docker + compose v2`.
-3. **`.env` bootstrap** — if no `.env`, copies [`.env.demo`](../.env.demo) → `.env` (or creates an empty `.env` if `.env.demo` is missing too).
+3. **`.env` bootstrap** — if no `.env`, copies [`.env.demo.example`](../.env.demo.example) → `.env` (or creates an empty `.env` if `.env.demo.example` is missing too).
 4. **Secrets** — auto-generates any missing secret into `.env`, then `chmod 600 .env` (see below).
 5. **LLM-key check** — warns if none found (see below).
 6. **Data dirs** — `mkdir -p data/config data/alien-monitor/universe data/secrets`; seeds `data/config/model_providers.yaml` from the example if absent.
@@ -91,7 +91,7 @@ You supply **one** LLM key — everything else is generated for you. `start.sh` 
 - **With a key:** `✓ LLM key detected — real AI agents enabled`.
 - **Without a key:** the stack still boots and the Monitor works, but the AI pipeline uses the **synthetic fallback (templated output)** instead of real agents. Add e.g. `DEEPSEEK_API_KEY=sk-...` to `.env`.
 
-The key is never generated — it is the one thing you provide. [`.env.demo`](../.env.demo) ships all example key lines commented out.
+The key is never generated — it is the one thing you provide. [`.env.demo.example`](../.env.demo.example) ships all example key lines commented out.
 
 ### Auto-generated secrets
 
@@ -169,7 +169,7 @@ Core is up.
 ### Preflight (in `quickstart_ecosystem.sh`)
 
 1. **Docker + Compose v2** — three hard gates (`docker`, `docker compose version`, `docker info`), each `die`s.
-2. **`.env` required** — unlike core `start.sh`, quickstart does **not** auto-generate secrets or copy `.env.demo`. If `.env` is missing it warns `cp .env.example .env` and `die`s.
+2. **`.env` required** — unlike core `start.sh`, quickstart does **not** auto-generate secrets or copy `.env.demo.example`. If `.env` is missing it warns `cp .env.example .env` and `die`s.
 3. **nginx / public-URL tier** — if `--public-url` is given it captures `PUBLIC_URL` and **warns** (does not die) if `nginx` is missing (Level-3 TLS tier). With no `--public-url`, nginx is not checked (local tier).
 
 Then: `scripts/deploy_ecosystem.sh "$@"`. Afterwards it prints next-steps (local URLs, re-verify command, and — only when `--public-url` was set — the `sudo CERTBOT_EMAIL=… ./scripts/setup-modelmarket-ssl.sh` one-shot), plus a note that **Metis, DIOSCURI, HELIOS are NOT launched by the fleet script**.
@@ -250,7 +250,7 @@ Open the repo in a Dev Container or GitHub Codespace and the box builds itself f
 | 9081 | Factory API | silent |
 | 9090 | Prometheus | silent |
 
-- **`postCreateCommand`:** runs [`.devcontainer/post-create.sh`](../.devcontainer/post-create.sh), which copies `.env.demo → .env` if needed and injects any LLM key present as an env/Codespaces **secret** (`DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`) into `.env` — never overwriting an existing key. It does **not** run `./start.sh` itself.
+- **`postCreateCommand`:** runs [`.devcontainer/post-create.sh`](../.devcontainer/post-create.sh), which copies `.env.demo.example → .env` if needed and injects any LLM key present as an env/Codespaces **secret** (`DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`) into `.env` — never overwriting an existing key. It does **not** run `./start.sh` itself.
 
 **How to supply the LLM key:** add one of the key names above as a Codespaces (or Dev Container) secret. On create it lands in `.env` automatically. Then in the terminal run:
 

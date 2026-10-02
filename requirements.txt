@@ -9,9 +9,14 @@
 # advisory backlog that was previously waived by scripts/pip_audit_gate.sh.
 fastapi==0.141.1
 starlette==1.6.0
-uvicorn[standard]==0.30.6
+uvicorn==0.54.0
+# Uvicorn 0.54 standard extra requires websockets>=13, which conflicts with
+# solana 0.34 (websockets<12). Pin the compatible runtime extras explicitly.
+httptools==0.8.0
+uvloop==0.22.1
+websockets==11.0.3
 watchfiles==0.24.0
-pydantic==2.9.0
+pydantic==2.13.5
 pydantic-settings==2.5.0
 pyyaml==6.0.2
 # 1.2.2 clears GHSA-mf9w-mj56-hr94.
@@ -90,11 +95,12 @@ hypothesis==6.112.0
 playwright==1.47.0
 
 # ── Monitoring ─────────────────────────────────────────────────────────────
-prometheus-client==0.20.0
+prometheus-client==0.26.0
+jsonschema==4.26.0
 psutil==6.0.0
 opentelemetry-api==1.28.0
 opentelemetry-sdk==1.28.0
 opentelemetry-exporter-otlp-proto-http==1.28.0
 
 # ── Market Research ──────────────────────────────────────────────────────────
-duckduckgo_search==7.5.1
+ddgs==9.16.0

@@ -119,3 +119,25 @@ def test_try_pm_spec_requeue_skips_advanced_product():
     }
     assert try_pm_spec_requeue(task, products, task_queue, lambda a: 4) is False
     assert len(task_queue) == 0
+
+
+def test_empire_mission_tasks_are_not_deduped():
+    products = {"p1": {"id": "p1", "state": "IDEA_RECEIVED", "idea": "x"}}
+    now = time.time()
+    task_queue = []
+    for i, lens in enumerate(("need", "money", "competition", "ai_advantage", "feasibility")):
+        task_queue.append({
+            "id": f"a{i}",
+            "product_id": "p1",
+            "agent_type": "analyst",
+            "state": "EMPIRE_RESEARCH",
+            "status": "pending",
+            "created_at": now + i,
+            "input_data": {"factory_personnel_assignment": True, "empire_research_lens": lens, "empire_department": "small_business"},
+        })
+    task_queue.extend([
+        {"id": "mgr", "product_id": "p1", "agent_type": "__department_manager_review__", "state": "EMPIRE_MANAGER_REVIEW", "status": "pending", "created_at": now + 10, "input_data": {"department": "small_business"}},
+        {"id": "ult", "product_id": "p1", "agent_type": "__ultron_review__", "state": "ULTRON_REVIEW", "status": "pending", "created_at": now + 11, "input_data": {"department": "small_business"}},
+    ])
+    assert enforce_task_queue_hygiene(products, task_queue, now) is False
+    assert [t["status"] for t in task_queue] == ["pending"] * 7

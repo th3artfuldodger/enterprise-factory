@@ -491,7 +491,55 @@ export interface CustomerProfile {
   id: string;
   email: string;
   plan?: string;
+  workspace_id?: string;
   usage?: { period_ym: string; runs_count: number };
+}
+
+export interface CustomerFactoryPayload {
+  workspace_id: string;
+  tenant_isolated: boolean;
+  organization: {
+    department_count: number;
+    research_agents_per_department: number;
+    research_agent_count: number;
+    departments: Array<{ slug: string; label: string }>;
+    research_lenses: Array<{ slug: string; label: string; mission?: string }>;
+    funding_utility?: { roles?: Array<{ id: string; label: string; mission?: string }> };
+  };
+  workforce?: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    role_class?: 'worker' | 'manager';
+    capability?: string;
+    division?: string;
+    permissions?: string[];
+    supervisor_id?: string | null;
+    supervisor_label?: string | null;
+  }>;
+  projects: Array<{
+    id: string;
+    kind: string;
+    product_id: string;
+    label: string;
+    state?: string;
+    department?: string;
+    active_task_count?: number;
+    active_tasks?: Array<{ id?: string; agent_type?: string; assigned_to?: string; status?: string }>;
+    decision_ready?: boolean;
+    manager_review?: { confidence?: number; challenge_notes?: string[]; manager_id?: string } | null;
+    primary_risk?: { risk_score_0_100?: number; missing_research_lenses?: string[]; lenses_without_evidence?: string[] } | null;
+    ultron_audit?: { recommendation?: string; challenges?: string[]; secondary_risk?: { secondary_risk_score_0_100?: number; evidence_items?: number } } | null;
+    decision_package?: Record<string, unknown> | null;
+  }>;
+  task_count: number;
+  funding?: {
+    request_count?: number;
+    owner_approval_count?: number;
+    capital_routes?: Array<{ id?: string; source?: string; destination?: string; amount_usd?: number; status?: string }>;
+    funding_opportunities?: Array<{ id: string; title?: string; status?: string; opportunity_type?: string; amount_estimate_usd?: number | null }>;
+  };
+  customer_permissions?: Record<string, boolean>;
 }
 
 export interface FeedbackData {
@@ -950,6 +998,69 @@ class ApiClient {
     return this.request('/customer/pipeline/run', {
       method: 'POST',
       body: JSON.stringify({ idea }),
+    });
+  }
+
+  async getCustomerFactory(): Promise<CustomerFactoryPayload> {
+    return this.request('/customer/factory');
+  }
+
+  async createCustomerFactoryMission(prompt: string): Promise<{
+    product_id: string;
+    workspace_id: string;
+    department: string;
+    department_label: string;
+    department_manager_id: string;
+    research_agents: Array<{ id: string; lens: string; label: string }>;
+    task_ids: string[];
+    status: string;
+    plan: string;
+    tenant_isolated: boolean;
+  }> {
+    return this.request('/customer/factory/mission', {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    });
+  }
+
+  async requestCustomerFactoryFunding(body: {
+    product_id?: string;
+    department: string;
+    amount_usd: number;
+    purpose: string;
+    source_preference?: string;
+    restrictions?: string[];
+  }): Promise<any> {
+    return this.request('/customer/factory/funding/request', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async scoutCustomerFactoryFunding(productId: string): Promise<any> {
+    return this.request(`/customer/factory/funding/scout/${encodeURIComponent(productId)}`, {
+      method: 'POST',
+    });
+  }
+
+  async createCustomerFactoryPersonnel(body: {
+    description: string;
+    role_class?: 'worker' | 'manager';
+    label?: string;
+  }): Promise<any> {
+    return this.request('/customer/factory/personnel', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async delegateCustomerFactoryManagerTask(
+    managerId: string,
+    body: { worker_id: string; product_id: string; directive: string },
+  ): Promise<any> {
+    return this.request(`/customer/factory/managers/${encodeURIComponent(managerId)}/delegate`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     });
   }
 
@@ -1636,6 +1747,135 @@ class ApiClient {
     pipeline_holds: Record<string, boolean>;
   }> {
     return this.request('/admin/pipeline/focus-mode', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async createFactoryFloorPersonnel(body: { description: string; role_class?: 'worker' | 'manager'; label?: string }): Promise<any> {
+    return this.request('/admin/factory-floor/personnel', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async reviewFactoryAssignmentReport(
+    taskId: string,
+    body: { action: 'accept' | 'send_back' | 'escalate' | 'incorporate'; feedback?: string },
+  ): Promise<any> {
+    return this.request(`/admin/factory-floor/assignment-reports/${encodeURIComponent(taskId)}/review`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async assignFactoryFloorPersonnel(
+    agentId: string,
+    body: { product_id: string; directive: string; manager_id?: string },
+  ): Promise<any> {
+    return this.request(`/admin/factory-floor/personnel/${encodeURIComponent(agentId)}/assign`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async delegateFactoryFloorManagerTask(
+    managerId: string,
+    body: { worker_id: string; product_id: string; directive: string },
+  ): Promise<any> {
+    return this.request(`/admin/factory-floor/managers/${encodeURIComponent(managerId)}/delegate`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async verifyEmpireFundingRequest(
+    requestId: string,
+    body: { verifier_id: string; passed: boolean; evidence?: Record<string, unknown>; note?: string },
+  ): Promise<any> {
+    return this.request(`/admin/empire/funding/requests/${encodeURIComponent(requestId)}/verify`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async saveEmpireFundingDecisionCard(
+    requestId: string,
+    body: Record<string, unknown>,
+  ): Promise<any> {
+    return this.request(`/admin/empire/funding/requests/${encodeURIComponent(requestId)}/decision-card`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async decideEmpireFundingRequest(
+    requestId: string,
+    approved: boolean,
+    note = '',
+  ): Promise<any> {
+    return this.request(`/admin/empire/funding/requests/${encodeURIComponent(requestId)}/owner-decision`, {
+      method: 'POST',
+      body: JSON.stringify({ approved, note }),
+    });
+  }
+
+  async createEmpireFundingBudget(body: {
+    workspace_id?: string;
+    ceiling_usd: number;
+    department?: string;
+    product_id?: string;
+    note?: string;
+  }): Promise<any> {
+    return this.request('/admin/empire/funding/budgets', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async advanceEmpireFundingOpportunity(
+    opportunityId: string,
+    nextStatus: string,
+    evidenceUpdate: Record<string, unknown> = {},
+  ): Promise<any> {
+    return this.request(`/admin/empire/funding/opportunities/${encodeURIComponent(opportunityId)}/advance`, {
+      method: 'POST',
+      body: JSON.stringify({ next_status: nextStatus, evidence_update: evidenceUpdate }),
+    });
+  }
+
+  async updateFactoryFloorPersonnel(
+    agentId: string,
+    body: {
+      action: 'promote' | 'demote' | 'set_division' | 'set_ecosystem' | 'grant_permission' | 'revoke_permission' | 'rename' | 'retire' | 'restore';
+      division?: string;
+      ecosystem?: string;
+      permission?: string;
+      label?: string;
+    },
+  ): Promise<any> {
+    return this.request(`/admin/factory-floor/personnel/${encodeURIComponent(agentId)}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async controlFactoryFloorProduct(
+    productId: string,
+    body: {
+      action: 'pause' | 'resume' | 'set_priority' | 'terminate';
+      priority?: 'normal' | 'high' | 'critical' | 'low';
+      reason?: string;
+    },
+  ): Promise<{
+    product_id: string;
+    action: string;
+    ok: boolean;
+    state?: string;
+    paused?: boolean;
+    priority?: string;
+  }> {
+    return this.request(`/admin/pipeline/products/${encodeURIComponent(productId)}/factory-control`, {
       method: 'POST',
       body: JSON.stringify(body),
     });

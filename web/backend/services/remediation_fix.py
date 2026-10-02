@@ -292,7 +292,7 @@ def audit_visible_credentials(root: str | None = None, *, limit: int = 20) -> li
     The read policy refuses these by path, and the container masks the highest-value ones out
     of the mount entirely. Neither is a reason to stop looking: masks are a hand-maintained
     list in a compose file, and the next `.env.something` to appear in the tree will not be on
-    it. Two already were not — `.env.demo` and `signal-hunt/.env.ci` — and only turned up
+    it. Two already were not — `.env.demo.example` and `signal-hunt/.env.ci` — and only turned up
     because someone went looking.
 
     So the fixer counts what it can reach and says so once per process. A number that grows is

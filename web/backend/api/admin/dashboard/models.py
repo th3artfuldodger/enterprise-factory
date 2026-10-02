@@ -99,6 +99,43 @@ class PipelineFocusModeBody(BaseModel):
     clear_focus: bool = False
 
 
+class FactoryFloorProductControlBody(BaseModel):
+    action: Literal["pause", "resume", "set_priority", "terminate"]
+    priority: Optional[Literal["normal", "high", "critical", "low"]] = None
+    reason: Optional[str] = Field(None, max_length=2000)
+
+
+class FactoryPersonnelCreateBody(BaseModel):
+    description: str = Field(..., min_length=1, max_length=2000)
+    role_class: Optional[Literal["worker", "manager"]] = None
+    label: Optional[str] = Field(None, max_length=80)
+
+
+class FactoryPersonnelUpdateBody(BaseModel):
+    action: Literal["promote", "demote", "set_division", "set_ecosystem", "grant_permission", "revoke_permission", "rename", "retire", "restore"]
+    division: Optional[str] = Field(None, max_length=80)
+    ecosystem: Optional[str] = Field(None, max_length=80)
+    permission: Optional[str] = Field(None, max_length=100)
+    label: Optional[str] = Field(None, max_length=80)
+
+
+class FactoryPersonnelAssignmentBody(BaseModel):
+    product_id: str = Field(..., min_length=1, max_length=128)
+    directive: str = Field(..., min_length=1, max_length=8000)
+    manager_id: Optional[str] = Field(None, max_length=128)
+
+
+class FactoryManagerDelegationBody(BaseModel):
+    worker_id: str = Field(..., min_length=1, max_length=128)
+    product_id: str = Field(..., min_length=1, max_length=128)
+    directive: str = Field(..., min_length=1, max_length=8000)
+
+
+class FactoryAssignmentReportReviewBody(BaseModel):
+    action: Literal["accept", "send_back", "escalate", "incorporate"]
+    feedback: Optional[str] = Field(None, max_length=4000)
+
+
 class StorefrontAdminPatch(BaseModel):
     """Human score + optional forced storefront listing (bypasses marketplace gates only)."""
 

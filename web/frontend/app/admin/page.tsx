@@ -361,7 +361,9 @@ function AdminPageInner() {
           </GlassCard>
         ) : null}
 
-        <AdminShellOnboarding activeTab={activeTab} locale={locale} />
+        {activeTab === 'dashboard' ? (
+          <AdminShellOnboarding activeTab={activeTab} locale={locale} />
+        ) : null}
 
         {factoryOnHold && activeTab !== 'settings' ? (
           <FactoryHoldBanner

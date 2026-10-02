@@ -199,7 +199,7 @@ mainnet **off**.
 ```bash
 git clone --recurse-submodules https://github.com/alexar76/aicom.git
 cd aicom
-cp .env.demo .env   # add ONE LLM key
+cp .env.demo.example .env   # add ONE LLM key
 ./start.sh --everything
 ```
 
@@ -231,7 +231,7 @@ real funds ([`core/crypto_config.py`](core/crypto_config.py)).
 ```bash
 git clone --recurse-submodules https://github.com/alexar76/aicom.git
 cd aicom
-cp .env.demo .env          # then add ONE key, e.g. DEEPSEEK_API_KEY=sk-...
+cp .env.demo.example .env          # then add ONE key, e.g. DEEPSEEK_API_KEY=sk-...
 ./start.sh                 # builds + boots core, opens the browser
 # → Factory  http://localhost:9080         idea → real AI build
 # → Monitor  http://localhost:9100/monitor/  live universe · reputation graph

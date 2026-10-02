@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from director.discovery_pipeline import DiscoveryPipeline, SourceRuntime, compute_idea_score
+from director.discovery_pipeline import DiscoveryPipeline, SourceRuntime, _safe_json, compute_idea_score
 
 
 def test_compute_idea_score_range() -> None:
@@ -83,3 +83,37 @@ def test_source_runtime_rate_and_backoff() -> None:
     ok3, reason3 = rt.can_call(now + 1.5)
     assert not ok3
     assert "backoff_active" in reason3
+
+
+def test_safe_json_accepts_wrapped_object() -> None:
+    out = _safe_json('Here is the JSON:\n```json\n{"ideas": []}\n```')
+    assert out == {"ideas": []}
+
+
+def test_safe_json_reports_truncated_object() -> None:
+    with pytest.raises(ValueError, match="Invalid/truncated JSON response"):
+        _safe_json('{"interviews":[{"persona":"owner","pain_score_0_10":')
+
+
+@pytest.mark.asyncio
+async def test_discovery_run_survives_truncated_candidate_json(tmp_path: Path) -> None:
+    class TruncatedRouter:
+        async def generate(self, prompt: str, task_type: str, config):  # noqa: ANN001
+            return '{"ideas":[{"idea":"A sufficiently long candidate product concept",'
+
+    pipeline = DiscoveryPipeline(router=TruncatedRouter(), data_dir=tmp_path / "discovery")
+    pipeline.collect_signals = lambda: []
+    result = await pipeline.run(existing_ideas=[], existing_categories=[])
+    assert result["ranked_ideas"]
+    assert "discovery-fallback" in result["ranked_ideas"][0]["tags"]
+
+
+@pytest.mark.asyncio
+async def test_problem_interviews_survive_truncated_json(tmp_path: Path) -> None:
+    class TruncatedRouter:
+        async def generate(self, prompt: str, task_type: str, config):  # noqa: ANN001
+            return '{"interviews":[{"persona":"owner","pain_score_0_10":'
+
+    pipeline = DiscoveryPipeline(router=TruncatedRouter(), data_dir=tmp_path / "discovery")
+    result = await pipeline._simulate_problem_interviews("Useful software idea", "saas")
+    assert result == []

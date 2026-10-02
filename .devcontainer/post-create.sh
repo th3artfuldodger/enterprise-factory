@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-[[ -f .env ]] || cp .env.demo .env
+[[ -f .env ]] || cp .env.demo.example .env
 
 # If a known LLM key is exposed as an env var (Codespaces/Dev Container secret),
 # write it into .env so ./start.sh picks it up. Never overwrite an existing one.

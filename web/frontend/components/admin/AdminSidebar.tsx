@@ -150,6 +150,8 @@ export function Sidebar({
               key={tab.id}
               href={`/admin?tab=${tab.id}`}
               scroll={false}
+              title={collapsed ? tab.label : undefined}
+              aria-label={tab.label}
               onClick={() => {
                 if (window.innerWidth < 768) onToggle();
               }}

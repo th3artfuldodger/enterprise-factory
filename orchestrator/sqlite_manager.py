@@ -48,11 +48,15 @@ METADATA_SQL_COLUMNS = {
 class SQLiteManager:
     """Manages SQLite connection and CRUD for pipeline state."""
 
-    def __init__(self, db_path: str | None = None):
+    def __init__(self, db_path: str | None = None, workspace_id: str | None = None):
         if db_path is None:
             db_path = str(pipeline_db_path())
         self.db_path = db_path
-        self.workspace_id = os.environ.get("AIFACTORY_WORKSPACE_ID", "default").strip() or "default"
+        self.workspace_id = (
+            str(workspace_id or "").strip()
+            or os.environ.get("AIFACTORY_WORKSPACE_ID", "default").strip()
+            or "default"
+        )
         self._conn: sqlite3.Connection | None = None
 
     # ------------------------------------------------------------------
@@ -227,6 +231,14 @@ class SQLiteManager:
         """Extract SQL column values from a task dict (from Task.to_dict())."""
         output_data = task.get("output_data", {}) or {}
         input_data = task.get("input_data", {}) or {}
+        priority = task.get("priority", 0)
+        try:
+            from web.backend.services.product_followup import get_product_factory_priority
+            override = get_product_factory_priority(str(task.get("product_id") or ""))
+            if override is not None:
+                priority = override
+        except Exception:
+            pass
         return {
             "id": task["id"],
             "workspace_id": task.get("workspace_id") or os.environ.get("AIFACTORY_WORKSPACE_ID", "default"),
@@ -241,7 +253,7 @@ class SQLiteManager:
             "input": json.dumps(input_data) if input_data else None,
             "output": json.dumps(output_data) if output_data else None,
             "error": task.get("error"),
-            "priority": task.get("priority", 0),
+            "priority": priority,
             "retry_count": task.get("retry_count", 0),
         }
 

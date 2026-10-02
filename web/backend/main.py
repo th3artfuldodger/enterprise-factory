@@ -632,8 +632,10 @@ app.include_router(admin_users_api.router)
 app.include_router(admin_iteration_hub.router)
 app.include_router(admin_pipeline_database.router)
 from web.backend.api.admin import action_log as admin_action_log_api
+from web.backend.api.admin import empire as admin_empire_api
 
 app.include_router(admin_action_log_api.router)
+app.include_router(admin_empire_api.router)
 from web.backend.api.admin import wow_features as admin_wow_features
 from web.backend.api.admin import blog_posts_admin as admin_blog_posts
 from web.backend.api.admin import funnel as admin_funnel

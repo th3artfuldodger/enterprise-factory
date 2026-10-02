@@ -23,6 +23,9 @@ IMPROVEMENT_ON_HOLD_KEY = "improvement_on_hold"
 IMPROVEMENT_ON_HOLD_AT_KEY = "improvement_on_hold_at"
 PIPELINE_ON_HOLD_KEY = "pipeline_on_hold"
 PIPELINE_ON_HOLD_AT_KEY = "pipeline_on_hold_at"
+FACTORY_PRIORITY_KEY = "factory_priority"
+FACTORY_PRIORITY_VALUE_KEY = "factory_priority_value"
+FACTORY_PRIORITY_AT_KEY = "factory_priority_at"
 
 
 def _data_root() -> Path:
@@ -87,6 +90,9 @@ def normalize_pipeline_followup(raw: Optional[dict[str, Any]]) -> dict[str, Any]
             "improvement_on_hold_at": None,
             "pipeline_on_hold": False,
             "pipeline_on_hold_at": None,
+            "factory_priority": "normal",
+            "factory_priority_value": None,
+            "factory_priority_at": None,
         }
     return {
         "followup": raw.get("followup"),
@@ -105,6 +111,9 @@ def normalize_pipeline_followup(raw: Optional[dict[str, Any]]) -> dict[str, Any]
         "improvement_on_hold_at": raw.get(IMPROVEMENT_ON_HOLD_AT_KEY),
         "pipeline_on_hold": bool(raw.get(PIPELINE_ON_HOLD_KEY)),
         "pipeline_on_hold_at": raw.get(PIPELINE_ON_HOLD_AT_KEY),
+        "factory_priority": str(raw.get(FACTORY_PRIORITY_KEY) or "normal"),
+        "factory_priority_value": raw.get(FACTORY_PRIORITY_VALUE_KEY),
+        "factory_priority_at": raw.get(FACTORY_PRIORITY_AT_KEY),
     }
 
 
@@ -121,6 +130,24 @@ def set_product_improvement_on_hold(product_id: str, on_hold: bool) -> dict[str,
         cur[IMPROVEMENT_ON_HOLD_AT_KEY] = time.time()
     else:
         cur.pop(IMPROVEMENT_ON_HOLD_AT_KEY, None)
+    write_followup(product_id, cur)
+    return normalize_pipeline_followup(cur)
+
+
+def get_product_factory_priority(product_id: str) -> int | None:
+    raw = read_followup(product_id) or {}
+    value = raw.get(FACTORY_PRIORITY_VALUE_KEY)
+    return int(value) if isinstance(value, (int, float)) else None
+
+
+def set_product_factory_priority(product_id: str, level: str, value: int | None) -> dict[str, Any]:
+    cur = read_followup(product_id) or {}
+    cur[FACTORY_PRIORITY_KEY] = str(level or "normal")
+    if value is None:
+        cur.pop(FACTORY_PRIORITY_VALUE_KEY, None)
+    else:
+        cur[FACTORY_PRIORITY_VALUE_KEY] = int(value)
+    cur[FACTORY_PRIORITY_AT_KEY] = time.time()
     write_followup(product_id, cur)
     return normalize_pipeline_followup(cur)
 

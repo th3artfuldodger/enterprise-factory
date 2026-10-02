@@ -84,18 +84,36 @@ class MarketEvidence:
 
 
 def _duckduckgo_search(query: str, max_results: int = 5) -> SearchOutcome:
-    """Search DuckDuckGo for market research (no API key needed)."""
+    """Search DuckDuckGo for market research (no API key needed).
+
+    DDGS may randomly choose a browser impersonation profile unsupported by the
+    installed HTTP transport. Retry those transient profile mismatches so a single
+    bad random choice does not erase the entire evidence packet.
+    """
     try:
-        from duckduckgo_search import DDGS
-        results = []
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=max_results):
-                results.append({
-                    "title": r.get("title", ""),
-                    "body": r.get("body", ""),
-                    "href": r.get("href", ""),
-                })
-        return SearchOutcome(ok=True, results=results)
+        try:
+            from ddgs import DDGS
+        except ImportError:  # Backward compatibility for older deployments.
+            from duckduckgo_search import DDGS
+
+        last_error = ""
+        for attempt in range(4):
+            try:
+                results = []
+                with DDGS() as ddgs:
+                    for r in ddgs.text(query, max_results=max_results):
+                        results.append({
+                            "title": r.get("title", ""),
+                            "body": r.get("body", ""),
+                            "href": r.get("href", ""),
+                        })
+                return SearchOutcome(ok=True, results=results)
+            except Exception as exc:
+                last_error = str(exc)
+                if "Invalid impersonate" not in last_error or attempt >= 3:
+                    raise
+                logger.info("Retrying market search after unsupported impersonation profile: %s", last_error)
+        return SearchOutcome(ok=False, results=[], error=last_error)
     except Exception as e:
         # Not installed, rate-limited, offline, blocked — all of it is a failed retrieval,
         # and none of it is market data.
@@ -198,12 +216,15 @@ class MarketResearchAgent(BaseAgent):
         from core.paths import market_research_path
 
         research_file = market_research_path(product_id)
-        is_monitoring = research_file.exists()
+        empire_lens = str(agent_input.data.get("empire_research_lens") or "").strip()
+        # Empire missions intentionally assign five independent research lenses to the
+        # same product. A prior lens writing market_research.json must not turn later
+        # lenses into telemetry monitoring work.
+        is_monitoring = research_file.exists() and not empire_lens
 
         if is_monitoring:
             return await self._run_monitoring(agent_input, start_time, product_id, idea, research_file)
-        else:
-            return await self._run_research(agent_input, start_time, product_id, idea)
+        return await self._run_research(agent_input, start_time, product_id, idea)
 
     # ── Stage 1: Market Research ──────────────────────────────────────────────
 
@@ -214,15 +235,18 @@ class MarketResearchAgent(BaseAgent):
         """Run market research with DuckDuckGo web search."""
         category = agent_input.data.get("category", "")
         tags = agent_input.data.get("tags", [])
+        empire_lens = str(agent_input.data.get("empire_research_lens") or "").strip()
+        assignment_directive = str(agent_input.data.get("assignment_directive") or "").strip()
+        search_subject = f"{idea} {empire_lens.replace('_', ' ')}".strip() if empire_lens else idea
 
-        self._log("INFO", f"Market researching: {idea[:80]}...")
+        self._log("INFO", f"Market researching: {search_subject[:80]}...")
 
         try:
             # Step 1: Gather real-time market data from DuckDuckGo
             self._log("INFO", f"Searching DuckDuckGo for market data on '{idea[:50]}'...")
             # DDG + httpx are synchronous; run off the asyncio loop so the pipeline worker
             # can still tick other tasks and persist checkpoint saves.
-            evidence = await asyncio.to_thread(_market_search, idea)
+            evidence = await asyncio.to_thread(_market_search, search_subject)
             if evidence.errors:
                 self._log(
                     "WARNING",
@@ -230,18 +254,45 @@ class MarketResearchAgent(BaseAgent):
                     f"succeeded ({len(evidence.errors)} failed)",
                 )
 
-            prompt = f"""{ANALYST_RESEARCH_PROMPT}
+            if empire_lens:
+                prompt = f"""You are one research specialist in a five-lens investment review.
+
+Mission: {idea}
+Your lens: {empire_lens}
+Assigned directive: {assignment_directive}
+
+Use ONLY the retrieved evidence below for factual claims. Return one concise JSON object with:
+- lens
+- executive_summary (2-4 sentences)
+- findings: at most 4 objects, each with claim, evidence_url, implication
+- risks: at most 3 short strings
+- opportunity_score_0_10 (10 = strongest opportunity under this lens)
+- confidence_0_100
+
+Do not invent URLs, figures, competitors, or facts. If evidence is weak, say so. Keep the entire answer under 650 tokens.
+
+{_evidence_block(evidence)}
+"""
+                output_budget = 700
+            else:
+                prompt = f"""{ANALYST_RESEARCH_PROMPT}
 
 Product Idea: {idea}
 Initial category: {category or "not assigned"}
 Initial tags: {', '.join(tags) if tags else "not assigned"}
+Empire research lens: {research_lens or "general market research"}
+Specific assignment: {assignment_directive or "Complete the market-research brief."}
+
+Focus the analysis on the assigned research lens while still returning the required JSON schema.
+Do not substitute a different lens. Explicitly connect findings and cited evidence to this assignment.
 
 {_evidence_block(evidence)}
 """
+                output_budget = FACTORY_MAX_OUTPUT_TOKENS_HEAVY
 
             config = GenerationConfig(
                 temperature=0.7,
-                max_tokens=FACTORY_MAX_OUTPUT_TOKENS_HEAVY,
+                max_tokens=output_budget,
                 timeout_sec=FACTORY_TIMEOUT_ANALYST_SEC,
                 json_mode=True,
             )

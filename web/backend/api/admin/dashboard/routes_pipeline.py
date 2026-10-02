@@ -68,6 +68,7 @@ from web.backend.services.dashboard_metrics_cache import (
     get_cached_dashboard,
     get_or_build_dashboard,
     set_cached_dashboard,
+    invalidate_dashboard_metrics_cache,
 )
 from web.backend.services.storefront_counts_cache import invalidate_storefront_categories_cache
 from web.backend.services.product_economics import compute_roi_band, get_product_llm_costs
@@ -700,6 +701,128 @@ async def post_pipeline_focus_mode(request: Request, body: PipelineFocusModeBody
         raise HTTPException(status_code=400, detail=client_error_detail(e)) from e
 
 
+@router.get("/factory-floor/personnel")
+async def get_factory_floor_personnel():
+    from web.backend.services.factory_personnel import list_personnel
+    return {"personnel": list_personnel()}
+
+
+@router.post("/factory-floor/personnel")
+async def post_factory_floor_personnel(body: FactoryPersonnelCreateBody):
+    from web.backend.services.factory_personnel import create_personnel
+    try:
+        result = await asyncio.to_thread(
+            create_personnel,
+            body.description,
+            role_class=body.role_class,
+            label=body.label,
+        )
+        invalidate_dashboard_metrics_cache()
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory-floor/assignment-reports/{task_id}/review")
+async def post_factory_floor_assignment_report_review(task_id: str, body: FactoryAssignmentReportReviewBody):
+    from web.backend.services.factory_assignment_reports import review_assignment_report
+    try:
+        result = await asyncio.to_thread(
+            review_assignment_report,
+            task_id,
+            action=body.action,
+            feedback=body.feedback or "",
+        )
+        invalidate_dashboard_metrics_cache()
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory-floor/personnel/{agent_id}/assign")
+async def post_factory_floor_personnel_assignment(agent_id: str, body: FactoryPersonnelAssignmentBody):
+    from web.backend.services.factory_assignments import assign_personnel_task
+    try:
+        result = await asyncio.to_thread(
+            assign_personnel_task,
+            product_id=body.product_id,
+            agent_id=agent_id,
+            directive=body.directive,
+            manager_id=body.manager_id,
+        )
+        invalidate_dashboard_metrics_cache()
+        try:
+            from orchestrator.queue_backend import signal_pipeline_new_work
+            signal_pipeline_new_work()
+        except Exception:
+            pass
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory-floor/managers/{manager_id}/delegate")
+async def post_factory_floor_manager_delegation(manager_id: str, body: FactoryManagerDelegationBody):
+    """Add a manager-created task to a subordinate AI worker's real queue."""
+    from web.backend.services.factory_assignments import delegate_manager_task
+    try:
+        result = await asyncio.to_thread(
+            delegate_manager_task,
+            manager_id=manager_id,
+            worker_id=body.worker_id,
+            product_id=body.product_id,
+            directive=body.directive,
+        )
+        invalidate_dashboard_metrics_cache()
+        try:
+            from orchestrator.queue_backend import signal_pipeline_new_work
+            signal_pipeline_new_work()
+        except Exception:
+            pass
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory-floor/personnel/{agent_id}")
+async def post_factory_floor_personnel_update(agent_id: str, body: FactoryPersonnelUpdateBody):
+    from web.backend.services.factory_personnel import update_personnel
+    try:
+        result = await asyncio.to_thread(
+            update_personnel,
+            agent_id,
+            action=body.action,
+            division=body.division,
+            ecosystem=body.ecosystem,
+            permission=body.permission,
+            label=body.label,
+        )
+        invalidate_dashboard_metrics_cache()
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/pipeline/products/{product_id}/factory-control")
+async def post_pipeline_product_factory_control(product_id: str, body: FactoryFloorProductControlBody):
+    """Pause, resume, prioritize, or safely terminate a project from Factory Floor."""
+    import asyncio
+    from web.backend.services.factory_floor_controls import control_factory_product
+
+    try:
+        result = await asyncio.to_thread(
+            control_factory_product,
+            product_id,
+            action=body.action,
+            priority=body.priority,
+            reason=body.reason or "",
+        )
+        invalidate_dashboard_metrics_cache()
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=client_error_detail(e)) from e
+
+
 @router.patch("/pipeline/products/{product_id}/storefront-admin")
 async def patch_pipeline_product_storefront_admin(product_id: str, body: StorefrontAdminPatch):
     """Human quality score (1–5) and/or forced public listing (requires justification note when enabling)."""
@@ -866,6 +989,11 @@ async def post_pipeline_human_review_approve(product_id: str, body: HumanReviewA
     res = approve_post_devops_human_review(product_id, note)
     if not res.get("ok"):
         raise HTTPException(status_code=400, detail=res.get("reason") or "human_review_approve_failed")
+    try:
+        from web.backend.services.factory_event_journal import emit_factory_event
+        emit_factory_event("human_review_approved", product_id=product_id, source="operator", target="sales", status="approved", summary=note or "Human review approved")
+    except Exception:
+        pass
     return {"product_id": product_id, **res}
 
 
@@ -875,5 +1003,10 @@ async def post_pipeline_human_review_reject(product_id: str, body: HumanReviewRe
     res = reject_post_devops_human_review(product_id, body.notes)
     if not res.get("ok"):
         raise HTTPException(status_code=400, detail=res.get("reason") or "human_review_reject_failed")
+    try:
+        from web.backend.services.factory_event_journal import emit_factory_event
+        emit_factory_event("human_review_rework", product_id=product_id, source="operator", target="developer", status="rework", summary=body.notes[:500])
+    except Exception:
+        pass
     return {"product_id": product_id, **res}
 

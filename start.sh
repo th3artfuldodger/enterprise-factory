@@ -136,11 +136,11 @@ fi
 
 # ── 2. .env ─────────────────────────────────────────────────────────────────
 if [[ ! -f .env ]]; then
-  if [[ -f .env.demo ]]; then
-    cp .env.demo .env
-    ok "Created .env from .env.demo"
+  if [[ -f .env.demo.example ]]; then
+    cp .env.demo.example .env
+    ok "Created .env from .env.demo.example"
   else
-    warn "No .env and no .env.demo — creating an empty .env"
+    warn "No .env and no .env.demo.example — creating an empty .env"
     : > .env
   fi
 fi

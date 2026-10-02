@@ -127,3 +127,60 @@ def test_browser_login_uses_httponly_cookie_without_returning_jwt(client):
     me = client.get("/api/customer/me", headers={"Origin": "http://localhost:8080"})
     assert me.status_code == 200
     assert me.json().get("email") == email
+
+
+def test_customer_factory_vertical_slice_http(client, journey_commerce, tmp_path, monkeypatch):
+    from web.backend.services import tenant_workspaces as tenants
+
+    monkeypatch.setattr(tenants, "data_root", lambda: tmp_path / "tenant-data")
+
+    email = "factory-vertical@example.test"
+    password = "password123"
+    reg = client.post("/api/customer/register", json={"email": email, "password": password})
+    assert reg.status_code == 200
+    token = reg.json()["access_token"]
+    auth = {"Authorization": f"Bearer {token}"}
+
+    initial = client.get("/api/customer/factory", headers=auth)
+    assert initial.status_code == 200
+    assert initial.json()["tenant_isolated"] is True
+    assert initial.json()["projects"] == []
+
+    mission = client.post(
+        "/api/customer/factory/mission",
+        headers=auth,
+        json={"prompt": "Research a market opportunity system for independent roofers and prepare a launch plan."},
+    )
+    assert mission.status_code == 200
+    mission_body = mission.json()
+    product_id = mission_body["product_id"]
+    assert mission_body["department"] == "small_business"
+    assert len(mission_body["research_agents"]) == 5
+    assert len(mission_body["task_ids"]) == 7
+
+    worker = client.post(
+        "/api/customer/factory/personnel",
+        headers=auth,
+        json={"description": "Validates lead sources and evidence.", "role_class": "worker", "label": "Lead Scout"},
+    )
+    manager = client.post(
+        "/api/customer/factory/personnel",
+        headers=auth,
+        json={"description": "Assigns and reviews lead research.", "role_class": "manager", "label": "Lead Manager"},
+    )
+    assert worker.status_code == manager.status_code == 200
+
+    delegated = client.post(
+        f"/api/customer/factory/managers/{manager.json()['id']}/delegate",
+        headers=auth,
+        json={"worker_id": worker.json()["id"], "product_id": product_id, "directive": "Validate the top three lead channels."},
+    )
+    assert delegated.status_code == 200
+
+    final = client.get("/api/customer/factory", headers=auth)
+    assert final.status_code == 200
+    body = final.json()
+    assert len(body["projects"]) == 1
+    assert body["task_count"] >= 8
+    assert len(body["workforce"]) == 2
+    assert body["customer_permissions"]["may_move_money"] is False

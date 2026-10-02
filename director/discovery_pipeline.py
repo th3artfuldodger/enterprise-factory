@@ -3,6 +3,7 @@ Discovery pipeline: opportunity signals -> validated ranked ideas.
 """
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -10,6 +11,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -81,24 +83,46 @@ class SourceRuntime:
         }
 
 
-def _duckduckgo_search(query: str, max_results: int = 8) -> list[dict[str, str]]:
+def _search_rss_fallback(query: str, max_results: int = 8) -> list[dict[str, str]]:
+    """Dependency-free web-search fallback using Bing's RSS search endpoint."""
     try:
-        from duckduckgo_search import DDGS
-
+        q = urllib.parse.quote_plus(query)
+        req = urllib.request.Request(
+            f"https://www.bing.com/search?format=rss&q={q}",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                "Accept": "application/rss+xml,application/xml,text/xml",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read()
+        root = ET.fromstring(body)
         out: list[dict[str, str]] = []
-        with DDGS() as ddgs:
-            for row in ddgs.text(query, max_results=max_results):
-                out.append(
-                    {
-                        "title": str(row.get("title") or "").strip(),
-                        "snippet": str(row.get("body") or "").strip(),
-                        "url": str(row.get("href") or "").strip(),
-                    }
-                )
+        for item in root.findall("./channel/item")[: max(1, max_results)]:
+            title = html.unescape(str(item.findtext("title") or "")).strip()
+            snippet_html = str(item.findtext("description") or "")
+            snippet = html.unescape(re.sub(r"<[^>]+>", " ", snippet_html))
+            snippet = re.sub(r"\s+", " ", snippet).strip()
+            url = html.unescape(str(item.findtext("link") or "")).strip()
+            if title and url:
+                out.append({"title": title[:300], "snippet": snippet[:500], "url": url})
         return out
     except Exception as exc:
-        logger.warning("Discovery search failed for query='%s': %s", query, exc)
+        logger.warning("Discovery RSS fallback failed for query='%s': %s", query, exc)
         return []
+
+
+def _duckduckgo_search(query: str, max_results: int = 8) -> list[dict[str, str]]:
+    """Stable web search adapter.
+
+    The historical ``duckduckgo_search`` dependency delegates TLS fingerprinting to
+    curl_cffi and can select impersonation profiles unsupported by the installed
+    curl_cffi build (for example chrome_127 / safari_18). That made discovery
+    nondeterministically lose whole sources. Use the dependency-free RSS search
+    path instead so source collection remains deterministic across builds.
+    """
+    return _search_rss_fallback(query, max_results=max_results)
 
 
 def _reddit_search(query: str, limit: int = 8) -> list[dict[str, str]]:
@@ -213,7 +237,21 @@ def _safe_json(text: str) -> dict[str, Any]:
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
     if fence:
         raw = fence.group(1).strip()
-    data = json.loads(raw)
+    if not raw:
+        raise ValueError("Empty JSON response")
+    # Providers occasionally prepend a sentence despite JSON-only prompts. Keep only
+    # the outer object when it is complete; truncated objects still raise below.
+    first = raw.find("{")
+    last = raw.rfind("}")
+    if first >= 0 and last > first:
+        raw = raw[first : last + 1]
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        tail = raw[max(0, exc.pos - 80) : exc.pos + 80].replace("\n", " ")
+        raise ValueError(
+            f"Invalid/truncated JSON response at line {exc.lineno} column {exc.colno}; context={tail!r}"
+        ) from exc
     if not isinstance(data, dict):
         raise ValueError("Expected JSON object")
     return data
@@ -484,9 +522,13 @@ Return strict JSON:
   ]
 }}
 Use 3-5 interviews. JSON only."""
-        cfg = GenerationConfig(temperature=0.25, max_tokens=1200, timeout_sec=90.0)
+        cfg = GenerationConfig(temperature=0.25, max_tokens=2200, timeout_sec=90.0, json_mode=True, model_override="deepseek-chat")
         text = await self.router.generate(prompt, task_type="market_research", config=cfg)
-        parsed = _safe_json(text)
+        try:
+            parsed = _safe_json(text)
+        except (ValueError, TypeError) as exc:
+            logger.warning("Problem-interview JSON unusable; preserving discovery cycle: %s", exc)
+            return []
         interviews = parsed.get("interviews")
         if not isinstance(interviews, list):
             return []
@@ -542,9 +584,13 @@ Return strict JSON:
   ]
 }}
 JSON only."""
-        cfg = GenerationConfig(temperature=0.2, max_tokens=1400, timeout_sec=90.0)
+        cfg = GenerationConfig(temperature=0.2, max_tokens=2400, timeout_sec=90.0, json_mode=True, model_override="deepseek-chat")
         text = await self.router.generate(prompt, task_type="market_research", config=cfg)
-        parsed = _safe_json(text)
+        try:
+            parsed = _safe_json(text)
+        except (ValueError, TypeError) as exc:
+            logger.warning("Competitive-gap JSON unusable; preserving discovery cycle: %s", exc)
+            return {}
         return {
             "competitors": [str(x) for x in (parsed.get("competitors") or [])][:8],
             "gaps": [x for x in (parsed.get("gaps") or []) if isinstance(x, dict)][:8],
@@ -597,9 +643,15 @@ JSON only."""
             temperature=0.35,
             max_tokens=FACTORY_MAX_OUTPUT_TOKENS_HEAVY,
             timeout_sec=120.0,
+            json_mode=True,
+            model_override="deepseek-chat",
         )
         text = await self.router.generate(prompt, task_type="market_research", config=cfg)
-        parsed = _safe_json(text)
+        try:
+            parsed = _safe_json(text)
+        except (ValueError, TypeError) as exc:
+            logger.warning("Candidate-idea JSON unusable; switching to deterministic fallback: %s", exc)
+            return []
         ideas = parsed.get("ideas") if isinstance(parsed.get("ideas"), list) else []
         norm: list[dict[str, Any]] = []
         for row in ideas:

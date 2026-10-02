@@ -441,10 +441,12 @@ class CommerceService:
         profile = self.get_customer(customer_id)
         plan = (profile or {}).get("plan") or "free"
         now = int(time.time())
+        from web.backend.services.tenant_workspaces import customer_workspace_id
         payload = {
             "sub": customer_id,
             "email": email,
             "plan": plan,
+            "workspace_id": customer_workspace_id(customer_id),
             "iat": now,
             "exp": now + self.jwt_expiry_seconds,
             "jti": uuid.uuid4().hex[:16],
