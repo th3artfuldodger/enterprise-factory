@@ -217,10 +217,13 @@ class MarketResearchAgent(BaseAgent):
 
         research_file = market_research_path(product_id)
         empire_lens = str(agent_input.data.get("empire_research_lens") or "").strip()
+        assignment_directive = str(agent_input.data.get("assignment_directive") or "").strip()
+        is_manager_assignment = bool((agent_input.data.get("factory_personnel_assignment") or False) and assignment_directive)
         # Empire missions intentionally assign five independent research lenses to the
-        # same product. A prior lens writing market_research.json must not turn later
-        # lenses into telemetry monitoring work.
-        is_monitoring = research_file.exists() and not empire_lens
+        # same product. Manager-delegated worker tasks must also honor the new directive
+        # instead of silently switching to generic telemetry monitoring just because prior
+        # market_research.json exists.
+        is_monitoring = research_file.exists() and not empire_lens and not is_manager_assignment
 
         if is_monitoring:
             return await self._run_monitoring(agent_input, start_time, product_id, idea, research_file)
@@ -237,7 +240,12 @@ class MarketResearchAgent(BaseAgent):
         tags = agent_input.data.get("tags", [])
         empire_lens = str(agent_input.data.get("empire_research_lens") or "").strip()
         assignment_directive = str(agent_input.data.get("assignment_directive") or "").strip()
-        search_subject = f"{idea} {empire_lens.replace('_', ' ')}".strip() if empire_lens else idea
+        if empire_lens:
+            search_subject = f"{idea} {empire_lens.replace('_', ' ')}".strip()
+        elif assignment_directive:
+            search_subject = f"{idea} {assignment_directive}".strip()
+        else:
+            search_subject = idea
 
         self._log("INFO", f"Market researching: {search_subject[:80]}...")
 
@@ -280,7 +288,7 @@ Do not invent URLs, figures, competitors, or facts. If evidence is weak, say so.
 Product Idea: {idea}
 Initial category: {category or "not assigned"}
 Initial tags: {', '.join(tags) if tags else "not assigned"}
-Empire research lens: {research_lens or "general market research"}
+Empire research lens: {empire_lens or "general market research"}
 Specific assignment: {assignment_directive or "Complete the market-research brief."}
 
 Focus the analysis on the assigned research lens while still returning the required JSON schema.

@@ -122,3 +122,31 @@ def test_empire_lens_forces_fresh_analyst_research_even_when_shared_artifact_exi
     assert result == "fresh-research"
     agent._run_research.assert_awaited_once()
     agent._run_monitoring.assert_not_awaited()
+
+
+def test_manager_delegated_analyst_task_forces_fresh_directive_research(tmp_path, monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+    from agents.analyst import MarketResearchAgent
+    from agents.base_agent import AgentInput
+    import core.paths
+
+    existing = tmp_path / "market_research.json"
+    existing.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(core.paths, "market_research_path", lambda _pid: existing)
+
+    agent = MarketResearchAgent(object())
+    agent._run_research = AsyncMock(return_value="delegated-research")
+    agent._run_monitoring = AsyncMock(return_value="monitoring")
+    inp = AgentInput(
+        task_id="t-delegated",
+        product_id="p1",
+        agent_type="analyst",
+        data={"idea": "roofing leads", "factory_personnel_assignment": True,
+              "manager_delegated": True, "assignment_directive": "Challenge the evidence assumptions."},
+    )
+    result = asyncio.run(agent.execute(inp))
+
+    assert result == "delegated-research"
+    agent._run_research.assert_awaited_once()
+    agent._run_monitoring.assert_not_awaited()
