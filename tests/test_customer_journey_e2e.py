@@ -184,3 +184,19 @@ def test_customer_factory_vertical_slice_http(client, journey_commerce, tmp_path
     assert body["task_count"] >= 8
     assert len(body["workforce"]) == 2
     assert body["customer_permissions"]["may_move_money"] is False
+    project = body["projects"][0]
+    assert project["timeline"], "mission replay should expose persisted task history"
+    assert project["task_summary"].get("pending", 0) >= 1
+
+    owner = client.post(
+        f"/api/customer/factory/projects/{product_id}/owner-decision",
+        headers=auth,
+        json={"action": "request_revision", "note": "Challenge the weakest assumptions before I accept this package."},
+    )
+    assert owner.status_code == 200
+    assert owner.json()["financial_authority"] is False
+    assert owner.json()["may_move_money"] is False
+
+    replay = client.get("/api/customer/factory", headers=auth).json()["projects"][0]
+    assert replay["owner_decision"]["action"] == "request_revision"
+    assert any(event["kind"] == "owner_decision" for event in replay["timeline"])

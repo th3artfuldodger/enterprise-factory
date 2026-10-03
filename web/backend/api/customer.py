@@ -23,6 +23,7 @@ from web.backend.schemas.api_requests import (
     CustomerFundingRequest,
     CustomerPersonnelRequest,
     CustomerManagerDelegationRequest,
+    CustomerOwnerDecisionRequest,
     CustomerLoginRequest,
     CustomerRegisterRequest,
     DemoNoteCreateRequest,
@@ -396,16 +397,18 @@ async def my_referral_dashboard(payload: dict = Depends(_get_token_payload)):
 async def customer_factory(payload: dict = Depends(_get_token_payload)):
     """Return this customer's isolated, game-facing Factory state."""
     from web.backend.services.empire_architecture import architecture_summary
-    from web.backend.services.funding_utility import funding_status_summary
+    from web.backend.services.funding_utility import funding_status_summary, list_requests
     from web.backend.services.tenant_workspaces import (
         customer_workspace_id,
         read_customer_pipeline_state,
     )
 
     customer_id = str(payload["sub"])
+    ws = customer_workspace_id(customer_id)
     state = read_customer_pipeline_state(customer_id)
     products = list((state.get("products") or {}).values())
     tasks = list(state.get("task_queue") or [])
+    funding_requests = list_requests(workspace_id=ws, limit=500)
     active_by_product: dict[str, list[dict]] = {}
     for task in tasks:
         pid = str(task.get("product_id") or "")
@@ -418,6 +421,54 @@ async def customer_factory(payload: dict = Depends(_get_token_payload)):
     for product in products:
         pid = str(product.get("id") or "")
         live = active_by_product.get(pid) or []
+        product_tasks = [t for t in tasks if str(t.get("product_id") or "") == pid]
+        timeline: list[dict] = []
+        for task in product_tasks:
+            status = str(task.get("status") or "pending").lower()
+            inp = task.get("input_data") or {}
+            out = task.get("output_data") or {}
+            assignment = out.get("factory_assignment_result") if isinstance(out, dict) else {}
+            evidence = (assignment or {}).get("evidence_sources") if isinstance(assignment, dict) else []
+            timeline.append({
+                "id": f"task:{task.get('id')}",
+                "kind": "task",
+                "timestamp": task.get("completed_at") or task.get("updated_at") or task.get("started_at") or task.get("created_at") or 0,
+                "status": status,
+                "actor": task.get("assigned_to") or task.get("agent_type") or "AI",
+                "agent_type": task.get("agent_type"),
+                "label": inp.get("assignment_directive") or inp.get("directive") or inp.get("empire_research_lens") or task.get("agent_type") or "Task",
+                "evidence_count": len(evidence or []),
+            })
+        manager_review = product.get("empire_manager_review") or {}
+        if manager_review:
+            timeline.append({
+                "id": "manager-review", "kind": "manager_review",
+                "timestamp": manager_review.get("reviewed_at") or 0,
+                "status": "completed", "actor": manager_review.get("manager_id") or "Department Manager",
+                "label": "Manager evidence review",
+            })
+        ultron_audit = product.get("ultron_audit") or {}
+        if ultron_audit:
+            timeline.append({
+                "id": "ultron-audit", "kind": "ultron_review",
+                "timestamp": ultron_audit.get("audited_at") or 0,
+                "status": "completed", "actor": "Ultron",
+                "label": f"Ultron: {str(ultron_audit.get('recommendation') or 'review').replace('_', ' ')}",
+                "evidence_count": ((ultron_audit.get("secondary_risk") or {}).get("evidence_items") or 0),
+            })
+        for idx, decision in enumerate(product.get("owner_decision_history") or []):
+            timeline.append({
+                "id": f"owner:{idx}", "kind": "owner_decision",
+                "timestamp": decision.get("decided_at") or 0,
+                "status": decision.get("action") or "recorded", "actor": "Factory Owner",
+                "label": decision.get("note") or str(decision.get("action") or "Owner decision").replace("_", " "),
+            })
+        timeline.sort(key=lambda event: float(event.get("timestamp") or 0))
+        project_funding = [req for req in funding_requests if str(req.get("product_id") or "") == pid]
+        status_counts: dict[str, int] = {}
+        for task in product_tasks:
+            key = str(task.get("status") or "pending").lower()
+            status_counts[key] = status_counts.get(key, 0) + 1
         project_nodes.append(
             {
                 "id": f"product:{pid}",
@@ -441,10 +492,13 @@ async def customer_factory(payload: dict = Depends(_get_token_payload)):
                 "primary_risk": product.get("empire_primary_risk"),
                 "ultron_audit": product.get("ultron_audit"),
                 "decision_package": product.get("empire_decision_package"),
+                "owner_decision": product.get("owner_decision"),
+                "funding_requests": project_funding[:20],
+                "task_summary": status_counts,
+                "timeline": timeline[-100:],
             }
         )
 
-    ws = customer_workspace_id(customer_id)
     from web.backend.services.customer_workforce import list_customer_personnel
     workforce = list_customer_personnel(customer_id)
     return {
@@ -524,6 +578,38 @@ async def customer_manager_delegate(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory/projects/{product_id}/owner-decision")
+async def customer_factory_owner_decision(
+    product_id: str,
+    body: CustomerOwnerDecisionRequest,
+    payload: dict = Depends(_get_token_payload),
+):
+    """Record a non-financial owner decision for a mission package."""
+    from web.backend.services.tenant_workspaces import read_customer_pipeline_state, write_customer_product
+
+    customer_id = str(payload["sub"])
+    state = read_customer_pipeline_state(customer_id)
+    product = (state.get("products") or {}).get(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if body.action == "accept_package" and not product.get("empire_decision_package"):
+        raise HTTPException(status_code=409, detail="Decision package is not ready")
+    decision = {
+        "action": body.action,
+        "note": (body.note or "").strip() or None,
+        "decided_at": time.time(),
+        "financial_authority": False,
+    }
+    history = list(product.get("owner_decision_history") or [])
+    history.append(decision)
+    product["owner_decision"] = decision
+    product["owner_decision_history"] = history[-100:]
+    if body.action == "archive":
+        product["archived"] = True
+    write_customer_product(customer_id, product)
+    return {"decision": decision, "financial_authority": False, "may_move_money": False}
 
 
 @router.post("/factory/mission")

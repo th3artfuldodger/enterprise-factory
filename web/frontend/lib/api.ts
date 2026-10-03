@@ -531,6 +531,10 @@ export interface CustomerFactoryPayload {
     primary_risk?: { risk_score_0_100?: number; missing_research_lenses?: string[]; lenses_without_evidence?: string[] } | null;
     ultron_audit?: { recommendation?: string; challenges?: string[]; secondary_risk?: { secondary_risk_score_0_100?: number; evidence_items?: number } } | null;
     decision_package?: Record<string, unknown> | null;
+    owner_decision?: { action?: 'accept_package' | 'request_revision' | 'archive'; note?: string | null; decided_at?: number; financial_authority?: boolean } | null;
+    funding_requests?: Array<{ id?: string; product_id?: string; amount_usd?: number; purpose?: string; status?: string; created_at?: number }>;
+    task_summary?: Record<string, number>;
+    timeline?: Array<{ id: string; kind: string; timestamp?: number; status?: string; actor?: string; agent_type?: string; label?: string; evidence_count?: number }>;
   }>;
   task_count: number;
   funding?: {
@@ -1059,6 +1063,16 @@ class ApiClient {
     body: { worker_id: string; product_id: string; directive: string },
   ): Promise<any> {
     return this.request(`/customer/factory/managers/${encodeURIComponent(managerId)}/delegate`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async recordCustomerFactoryOwnerDecision(
+    productId: string,
+    body: { action: 'accept_package' | 'request_revision' | 'archive'; note?: string },
+  ): Promise<any> {
+    return this.request(`/customer/factory/projects/${encodeURIComponent(productId)}/owner-decision`, {
       method: 'POST',
       body: JSON.stringify(body),
     });

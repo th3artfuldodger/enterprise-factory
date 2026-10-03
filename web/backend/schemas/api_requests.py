@@ -170,6 +170,11 @@ class CustomerManagerDelegationRequest(StrictRequestModel):
     directive: str = Field(..., min_length=1, max_length=8000)
 
 
+class CustomerOwnerDecisionRequest(StrictRequestModel):
+    action: Literal["accept_package", "request_revision", "archive"]
+    note: Optional[str] = Field(None, max_length=2000)
+
+
 class DemoNoteCreateRequest(StrictRequestModel):
     title: str = Field(..., min_length=1, max_length=500)
     body: str = Field("", max_length=8000)
