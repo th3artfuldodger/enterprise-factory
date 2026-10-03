@@ -395,38 +395,6 @@ export default function CustomerFactoryPage() {
           </button>)}</div> : <p className="text-sm text-slate-500">No missions yet. Give the Factory its first mission above.</p>}
         </GlassCard>
 
-        {selectedProject ? <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_.8fr]">
-          <GlassCard className="border-amber-300/20 p-4">
-            <div className="flex items-center gap-2"><Crown className="h-4 w-4 text-amber-300" /><p className="text-xs font-black uppercase text-amber-100">Owner Decision Workspace</p></div>
-            <p className="mt-2 text-[11px] font-semibold text-slate-200">{selectedProject.label}</p>
-            {selectedProject.decision_ready ? <>
-              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <div className="rounded border border-white/8 bg-black/25 p-2"><p className="text-[6px] uppercase text-slate-600">Manager confidence</p><p className="mt-1 text-lg font-black text-cyan-100">{Math.round(selectedProject.manager_review?.confidence || 0)}%</p></div>
-                <div className="rounded border border-white/8 bg-black/25 p-2"><p className="text-[6px] uppercase text-slate-600">Primary risk</p><p className="mt-1 text-lg font-black text-rose-100">{Math.round(selectedProject.primary_risk?.risk_score_0_100 || 0)}</p></div>
-                <div className="rounded border border-white/8 bg-black/25 p-2"><p className="text-[6px] uppercase text-slate-600">Ultron risk</p><p className="mt-1 text-lg font-black text-violet-100">{Math.round(selectedProject.ultron_audit?.secondary_risk?.secondary_risk_score_0_100 || 0)}</p></div>
-                <div className="rounded border border-white/8 bg-black/25 p-2"><p className="text-[6px] uppercase text-slate-600">Evidence</p><p className="mt-1 text-lg font-black text-emerald-100">{selectedProject.ultron_audit?.secondary_risk?.evidence_items || 0}</p></div>
-              </div>
-              <div className="mt-3 rounded border border-violet-400/15 bg-violet-400/5 p-3"><p className="text-[7px] font-black uppercase tracking-[.15em] text-violet-200">Ultron recommendation</p><p className="mt-1 text-sm font-black uppercase text-white">{String(selectedProject.ultron_audit?.recommendation || 'review').replace(/_/g, ' ')}</p>{(selectedProject.ultron_audit?.challenges || []).map((challenge) => <p key={challenge} className="mt-1 text-[8px] text-slate-400">• {challenge}</p>)}</div>
-              <textarea value={ownerNote} onChange={(e) => setOwnerNote(e.target.value)} rows={2} placeholder="Optional owner note or revision instruction…" className="mt-3 w-full resize-none rounded-lg border border-white/10 bg-black/45 px-3 py-2 text-[10px] outline-none placeholder:text-slate-700 focus:border-amber-300/40" />
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" disabled={ownerBusy} onClick={() => void recordOwnerDecision('accept_package')} className="rounded border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-[8px] font-black uppercase text-emerald-100 disabled:opacity-40"><CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />Accept package</button>
-                <button type="button" disabled={ownerBusy} onClick={() => void recordOwnerDecision('request_revision')} className="rounded border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-[8px] font-black uppercase text-amber-100 disabled:opacity-40"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" />Request revision</button>
-                <button type="button" disabled={ownerBusy} onClick={() => void recordOwnerDecision('archive')} className="rounded border border-white/10 bg-white/5 px-3 py-2 text-[8px] font-black uppercase text-slate-400 disabled:opacity-40">Archive</button>
-                <a href={`/api/customer/factory/reports/${encodeURIComponent(selectedProject.product_id)}.pdf`} className="rounded border border-sky-400/20 bg-sky-400/8 px-3 py-2 text-[8px] font-black uppercase text-sky-200">Decision PDF</a>
-              </div>
-              <p className="mt-2 text-[7px] uppercase text-slate-600">These owner actions do not authorize funding or move money.</p>
-            </> : <div className="mt-3 flex items-center gap-2 rounded border border-cyan-400/15 bg-cyan-400/5 p-3 text-[9px] text-cyan-100"><Loader2 className="h-4 w-4 animate-spin" />Decision package is still moving through the Factory.</div>}
-          </GlassCard>
-
-          <GlassCard className="border-slate-400/15 p-4">
-            <div className="flex items-center gap-2"><Clock3 className="h-4 w-4 text-slate-300" /><p className="text-xs font-black uppercase text-slate-200">Mission Replay</p><span className="ml-auto text-[7px] text-slate-600">Persistent audit history</span></div>
-            <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1">{(selectedProject.timeline || []).length ? (selectedProject.timeline || []).slice().reverse().map((event) => <div key={event.id} className="rounded-lg border border-white/7 bg-black/25 p-2.5">
-              <div className="flex items-center gap-2">{event.status === 'completed' || event.kind === 'owner_decision' ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" /> : event.status === 'running' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-300" /> : <CircleDot className="h-3.5 w-3.5 text-slate-600" />}<p className="min-w-0 flex-1 truncate text-[8px] font-black uppercase text-slate-300">{event.actor || event.kind}</p>{event.evidence_count ? <span className="text-[7px] text-emerald-300">{event.evidence_count} evidence</span> : null}</div>
-              <p className="mt-1 line-clamp-3 text-[8px] text-slate-500">{String(event.label || event.status || '').replace(/_/g, ' ')}</p>
-              {event.timestamp ? <p className="mt-1 text-[6px] text-slate-700">{new Date(event.timestamp * 1000).toLocaleString()}</p> : null}
-            </div>) : <p className="text-[9px] text-slate-600">No history recorded yet.</p>}</div>
-          </GlassCard>
-        </div> : null}
       </div>
     </main>
   );
