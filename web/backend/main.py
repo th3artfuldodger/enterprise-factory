@@ -385,6 +385,22 @@ def _request_uses_https(request: Request) -> bool:
 
 
 @app.middleware("http")
+async def request_trace(request: Request, call_next):
+    """Attach a safe request ID and latency to every response for incident tracing."""
+    raw = (request.headers.get("x-request-id") or "").strip()
+    request_id = raw if raw and len(raw) <= 64 and all(c.isalnum() or c in "-_." for c in raw) else uuid.uuid4().hex
+    request.state.request_id = request_id
+    started = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = round((time.perf_counter() - started) * 1000.0, 1)
+    response.headers["X-Request-ID"] = request_id
+    response.headers["Server-Timing"] = f"app;dur={elapsed_ms}"
+    if request.url.path.startswith("/api/"):
+        logger.info("request_id=%s method=%s path=%s status=%s duration_ms=%.1f", request_id, request.method, request.url.path, response.status_code, elapsed_ms)
+    return response
+
+
+@app.middleware("http")
 async def force_https(request: Request, call_next):
     """Redirect public HTTP traffic to HTTPS when production TLS enforcement is enabled."""
     if (
@@ -475,6 +491,9 @@ def safe_error(
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
     body: dict[str, str] = {"detail": "Internal server error"}
+    request_id = getattr(getattr(request, "state", None), "request_id", None)
+    if request_id:
+        body["request_id"] = str(request_id)
     if _expose_error_details():
         body["message"] = str(exc)
     return JSONResponse(status_code=500, content=body)
@@ -492,6 +511,15 @@ async def health_check():
         "service": "ai-factory-backend",
         "uptime_seconds": factory_uptime_seconds(),
     }
+
+
+@app.get("/api/health/ready")
+async def readiness_check():
+    """Detailed dependency/data readiness used by operators and deployment probes."""
+    from web.backend.services.production_readiness import production_readiness_snapshot
+
+    snapshot = await asyncio.to_thread(production_readiness_snapshot)
+    return JSONResponse(status_code=200 if snapshot.get("ready") else 503, content=snapshot)
 
 
 @app.get("/api/public/showcase-gallery")

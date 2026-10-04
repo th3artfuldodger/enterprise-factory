@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
@@ -94,6 +94,7 @@ const getCategoryColor = (cat: string): string => {
 };
 
 export default function ProductDetailPage() {
+  const router = useRouter();
   const params = useParams();
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
@@ -318,7 +319,7 @@ export default function ProductDetailPage() {
           <AlertTriangle className="w-16 h-16 text-red-400 mx-auto mb-4" />
           <p className="text-red-400 text-lg mb-2">Failed to load product</p>
           <p className="text-gray-500 text-sm mb-4">{error}</p>
-          <Button variant="secondary" onClick={() => (window.location.href = '/')}>
+          <Button variant="secondary" onClick={() => (router.push('/'))}>
             Back to Home
           </Button>
         </div>
@@ -952,7 +953,7 @@ export default function ProductDetailPage() {
             icon={<ShoppingCart className="w-4 h-4" />}
             onClick={() => {
               trackEvent('checkout_click', { placement: 'product_actions' }, product.id);
-              window.location.href = `/checkout?product=${product.id}`;
+              router.push(`/checkout?product=${product.id}`);
             }}
           >
             Purchase with Crypto

@@ -34,6 +34,12 @@ async def firewall_http_middleware(request: Request, call_next):
     allowed, reason = fw.http_request_allowed(ip, port)
     if not allowed:
         logger.warning("Firewall blocked %s %s from %s: %s", request.method, request.url.path, ip, reason)
+        if reason == "rate_limited":
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests", "reason": reason},
+                headers={"Retry-After": str(max(1, int(getattr(fw, "default_rate_window", 60.0))))},
+            )
         return JSONResponse(status_code=403, content={"detail": "Forbidden", "reason": reason})
 
     if request.method not in ("OPTIONS", "HEAD"):

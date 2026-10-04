@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { useRouter } from 'next/navigation';
 import {
   Sparkles,
   Send,
@@ -156,6 +157,7 @@ const QUICK_PRESETS = [
 const INTRO_STORAGE = 'aicom_new_product_intro_dismissed_v1';
 
 export function NewProductTab({ locale }: { locale: AdminLocale }) {
+  const router = useRouter();
   const stepLabels = useMemo(() => getStepLabels(locale), [locale]);
   const {
     step,
@@ -1003,7 +1005,7 @@ export function NewProductTab({ locale }: { locale: AdminLocale }) {
                           size="sm"
                           onClick={() => {
                             resetNewProductWizard();
-                            window.location.assign('/admin?tab=dashboard');
+                            router.push('/admin?tab=dashboard');
                           }}
                         >
                           Go to Home

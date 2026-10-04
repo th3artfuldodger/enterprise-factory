@@ -312,7 +312,7 @@ function HeroSection({ copy }: { copy: MarketingStrings }) {
     } catch {
       /* ignore */
     }
-    window.location.href = '/admin?tab=new-product';
+    router.push('/admin?tab=new-product');
   };
 
   const guestBuildLanding = async () => {
@@ -451,7 +451,7 @@ function HeroSection({ copy }: { copy: MarketingStrings }) {
               <span className="hidden sm:inline text-gray-600">·</span>
               <button
                 type="button"
-                onClick={() => (window.location.href = '/admin')}
+                onClick={() => (router.push('/admin'))}
                 className="text-sm text-gray-400 hover:text-white text-left underline-offset-4 hover:underline"
               >
                 {copy.heroCtaAdminOnly}
@@ -524,7 +524,7 @@ function HeroSection({ copy }: { copy: MarketingStrings }) {
             variant="secondary"
             size="lg"
             icon={<Zap className="w-5 h-5" />}
-            onClick={() => (window.location.href = '/admin')}
+            onClick={() => (router.push('/admin'))}
           >
             {copy.ctaPrimary}
           </Button>
@@ -1203,6 +1203,7 @@ function ProductsSection({ copy }: { copy: MarketingStrings }) {
 // ── CTA Section ──────────────────────────────────────────────────────────
 
 function CTASection({ copy }: { copy: MarketingStrings }) {
+  const router = useRouter();
   return (
     <section className="py-24 px-4">
       <div className="max-w-4xl mx-auto text-center">
@@ -1222,7 +1223,7 @@ function CTASection({ copy }: { copy: MarketingStrings }) {
             <Button
               size="lg"
               icon={<Zap className="w-5 h-5" />}
-              onClick={() => (window.location.href = '/admin')}
+              onClick={() => (router.push('/admin'))}
             >
               {copy.ctaBannerPrimary}
             </Button>
@@ -1230,7 +1231,7 @@ function CTASection({ copy }: { copy: MarketingStrings }) {
               variant="secondary"
               size="lg"
               icon={<BookOpen className="w-5 h-5" />}
-              onClick={() => (window.location.href = '/docs')}
+              onClick={() => (router.push('/docs'))}
             >
               {copy.ctaBannerSecondary}
             </Button>

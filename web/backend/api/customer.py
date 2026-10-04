@@ -426,6 +426,8 @@ async def customer_factory(payload: dict = Depends(_get_token_payload)):
     )
     provider_health = local_ollama_health()
     audit_provider_transition(customer_id, provider_health)
+    from web.backend.services.production_readiness import customer_readiness_summary
+    system_health = customer_readiness_summary(customer_id)
     profile = commerce.get_customer(customer_id) or {}
     plan = str(profile.get("plan") or "free").lower()
     try:
@@ -543,6 +545,7 @@ async def customer_factory(payload: dict = Depends(_get_token_payload)):
         "workforce": workforce,
         "funding": funding_status_summary(workspace_id=ws),
         "provider_health": provider_health,
+        "system_health": system_health,
         "plan": plan,
         "usage": usage,
         "mission_templates": MISSION_TEMPLATES,

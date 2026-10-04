@@ -128,8 +128,8 @@ function AdminPageInner() {
       /* clear local session even if revoke fails */
     }
     localStorage.removeItem('admin_token');
-    window.location.href = '/';
-  }, []);
+    router.push('/');
+  }, [router]);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const locale = useAdminSessionStore((s) => s.locale);

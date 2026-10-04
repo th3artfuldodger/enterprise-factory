@@ -81,7 +81,7 @@ function clearAdminSessionAndRedirectToLogin(): void {
     window.location.pathname.startsWith('/admin') &&
     !window.location.pathname.startsWith('/admin/login');
   if (onAdminUi) {
-    window.location.href = '/admin/login';
+    window.location.replace(new URL('/admin/login', window.location.origin).toString());
   }
 }
 
@@ -549,6 +549,7 @@ export interface CustomerFactoryPayload {
   qa_canary?: { ok?: boolean; checked_at?: number; checks?: Record<string, boolean>; errors?: string[]; status?: string };
   model_failover?: { router_enabled?: boolean; primary?: string; degraded_mode?: boolean; note?: string };
   provider_health?: { provider?: string; online?: boolean; status?: string; version?: string | null; models?: string[]; latency_ms?: number; last_checked_at?: number; recovery_count?: number; last_recovered_at?: number | null; error?: string | null };
+  system_health?: { ready?: boolean; provider_online?: boolean; database_ok?: boolean; schema_version?: number; disk_level?: string; canary_ok?: boolean; canary_checked_at?: number; backup_enabled?: boolean; latest_backup?: string | null; failed_tasks?: number };
   funding?: {
     request_count?: number;
     owner_approval_count?: number;

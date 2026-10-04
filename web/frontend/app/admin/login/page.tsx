@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Cpu, Lock, KeyRound, AlertTriangle, Eye, EyeOff, User, Languages } from 'lucide-react';
 import { GlassCard } from '@/components/ui/GlassCard';
@@ -16,6 +17,7 @@ import {
 } from '@/lib/adminI18n';
 
 export default function AdminLoginPage() {
+  const router = useRouter();
   const [locale, setLocale] = useState<AdminLocale>('en');
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
@@ -72,7 +74,7 @@ export default function AdminLoginPage() {
       localStorage.removeItem('admin_token');
       localStorage.removeItem('customer_token');
       localStorage.removeItem('customer_email');
-      window.location.href = '/admin?tab=dashboard';
+      router.push('/admin?tab=dashboard');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t(locale, 'login.invalidCredentials');
       if (msg === '2FA code required' && !totpCode) {
@@ -227,7 +229,7 @@ export default function AdminLoginPage() {
                   size="lg"
                   variant="secondary"
                   onClick={() => {
-                    window.location.href = '/api/admin/auth/oidc/login';
+                    window.location.assign(new URL('/api/admin/auth/oidc/login', window.location.origin).toString());
                   }}
                   disabled={loading}
                 >

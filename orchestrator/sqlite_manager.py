@@ -32,6 +32,8 @@ from .schema import SQLITE_SCHEMA
 
 logger = logging.getLogger(__name__)
 
+CURRENT_SCHEMA_VERSION = 1
+
 # Keys stored in Product.metadata that have dedicated SQL columns
 METADATA_SQL_COLUMNS = {
     "spec": "spec",
@@ -70,6 +72,7 @@ class SQLiteManager:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
+        self._conn.execute("PRAGMA foreign_keys=ON")
         try:
             self._conn.executescript(SQLITE_SCHEMA)
         except sqlite3.OperationalError as e:
@@ -117,6 +120,7 @@ class SQLiteManager:
             self._conn.execute("ALTER TABLE products ADD COLUMN generic_metadata TEXT")
         except sqlite3.OperationalError as _suppressed_exc:
             log_suppressed(logger, "non-fatal (orchestrator/sqlite_manager.py)", exc_info=_suppressed_exc)
+        self._conn.execute(f"PRAGMA user_version={CURRENT_SCHEMA_VERSION}")
         self._conn.commit()
         logger.debug("Connected to SQLite at %s", self.db_path)
 
@@ -125,6 +129,25 @@ class SQLiteManager:
         if self._conn:
             self._conn.close()
             self._conn = None
+
+    def integrity_status(self) -> dict[str, Any]:
+        """Return a non-mutating integrity/migration snapshot for this database."""
+        integrity = str(self.conn.execute("PRAGMA integrity_check").fetchone()[0])
+        fk_rows = self.conn.execute("PRAGMA foreign_key_check").fetchall()
+        journal = str(self.conn.execute("PRAGMA journal_mode").fetchone()[0])
+        user_version = int(self.conn.execute("PRAGMA user_version").fetchone()[0])
+        orphan_tasks = int(self.conn.execute(
+            "SELECT COUNT(*) FROM tasks t LEFT JOIN products p ON p.id=t.product_id WHERE p.id IS NULL"
+        ).fetchone()[0])
+        return {
+            "ok": integrity.lower() == "ok" and not fk_rows and orphan_tasks == 0,
+            "integrity": integrity,
+            "foreign_key_violations": len(fk_rows),
+            "orphan_tasks": orphan_tasks,
+            "journal_mode": journal,
+            "schema_version": user_version,
+            "expected_schema_version": CURRENT_SCHEMA_VERSION,
+        }
 
     @property
     def conn(self) -> sqlite3.Connection:
