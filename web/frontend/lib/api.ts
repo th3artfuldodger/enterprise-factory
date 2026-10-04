@@ -534,9 +534,10 @@ export interface CustomerFactoryPayload {
     owner_decision?: { action?: 'accept_package' | 'request_revision' | 'archive'; note?: string | null; decided_at?: number; financial_authority?: boolean } | null;
     funding_requests?: Array<{ id?: string; product_id?: string; amount_usd?: number; purpose?: string; status?: string; created_at?: number }>;
     task_summary?: Record<string, number>;
-    timeline?: Array<{ id: string; kind: string; timestamp?: number; status?: string; actor?: string; agent_type?: string; label?: string; evidence_count?: number }>;
+    timeline?: Array<{ id: string; kind: string; timestamp?: number; status?: string; actor?: string; agent_type?: string; label?: string; evidence_count?: number; retry_count?: number; error?: string | null; retryable?: boolean; task_id?: string }>;
   }>;
   task_count: number;
+  provider_health?: { provider?: string; online?: boolean; status?: string; version?: string | null; models?: string[]; latency_ms?: number; last_checked_at?: number; recovery_count?: number; last_recovered_at?: number | null; error?: string | null };
   funding?: {
     request_count?: number;
     owner_approval_count?: number;
@@ -1075,6 +1076,12 @@ class ApiClient {
     return this.request(`/customer/factory/projects/${encodeURIComponent(productId)}/owner-decision`, {
       method: 'POST',
       body: JSON.stringify(body),
+    });
+  }
+
+  async retryCustomerFactoryTask(taskId: string): Promise<{ task_id: string; retry_of: string; status: string; deduplicated?: boolean }> {
+    return this.request(`/customer/factory/tasks/${encodeURIComponent(taskId)}/retry`, {
+      method: 'POST',
     });
   }
 

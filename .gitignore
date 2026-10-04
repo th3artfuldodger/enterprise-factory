@@ -337,3 +337,8 @@ cite-desks/kernel/desk.db
 # Download cache for scripts/selfhost_google_fonts.py — regenerable from Google, and what
 # the sites serve is their own copy under each web root, so this is never the source of truth.
 scripts/.webfont-cache/
+
+# Local deploy satellite checkouts. These are independent Git repositories fetched/managed
+# by scripts/ensure_deploy_satellites.sh; never absorb their histories into this repository.
+/acex/
+/aimarket-hub/

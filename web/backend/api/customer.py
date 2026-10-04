@@ -409,6 +409,8 @@ async def customer_factory(payload: dict = Depends(_get_token_payload)):
     products = list((state.get("products") or {}).values())
     tasks = list(state.get("task_queue") or [])
     funding_requests = list_requests(workspace_id=ws, limit=500)
+    from web.backend.services.provider_health import local_ollama_health
+    provider_health = local_ollama_health()
     active_by_product: dict[str, list[dict]] = {}
     for task in tasks:
         pid = str(task.get("product_id") or "")
@@ -438,6 +440,10 @@ async def customer_factory(payload: dict = Depends(_get_token_payload)):
                 "agent_type": task.get("agent_type"),
                 "label": inp.get("assignment_directive") or inp.get("directive") or inp.get("empire_research_lens") or task.get("agent_type") or "Task",
                 "evidence_count": len(evidence or []),
+                "retry_count": int(task.get("retry_count") or 0),
+                "error": task.get("error"),
+                "retryable": status in {"failed", "blocked"},
+                "task_id": task.get("id"),
             })
         manager_review = product.get("empire_manager_review") or {}
         if manager_review:
@@ -509,6 +515,7 @@ async def customer_factory(payload: dict = Depends(_get_token_payload)):
         "task_count": len(tasks),
         "workforce": workforce,
         "funding": funding_status_summary(workspace_id=ws),
+        "provider_health": provider_health,
         "customer_permissions": {
             "may_create_projects": True,
             "may_create_ai_personnel": True,
@@ -576,6 +583,18 @@ async def customer_manager_delegate(
             product_id=body.product_id,
             directive=body.directive,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory/tasks/{task_id}/retry")
+async def customer_factory_retry_task(
+    task_id: str,
+    payload: dict = Depends(_get_token_payload),
+):
+    from web.backend.services.customer_task_recovery import retry_customer_task
+    try:
+        return retry_customer_task(str(payload["sub"]), task_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
 

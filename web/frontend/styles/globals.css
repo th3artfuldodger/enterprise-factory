@@ -1,8 +1,7 @@
 /* Served from public/fonts/ by us, not by Google — see scripts/selfhost_google_fonts.py. */
 @import url('./fonts/fonts.css');
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@config "../tailwind.config.ts";
+@import "tailwindcss";
 
 /* ============================================================================
    AUTONOMOUS AI-FACTORY v2.1 — Global Styles

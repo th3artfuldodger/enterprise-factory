@@ -79,6 +79,7 @@ type Props = { initial: FactoryAgentsRoster };
 export function FactoryAgentsRosterClient({ initial }: Props) {
   const [roster, setRoster] = useState(initial);
   const [updatedAt, setUpdatedAt] = useState<number>(() => Date.now());
+  const [ageSeconds, setAgeSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -90,6 +91,7 @@ export function FactoryAgentsRosterClient({ initial }: Props) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setRoster(normalize(await res.json()));
       setUpdatedAt(Date.now());
+      setAgeSeconds(0);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'refresh failed');
@@ -98,12 +100,14 @@ export function FactoryAgentsRosterClient({ initial }: Props) {
 
   useEffect(() => {
     const id = window.setInterval(refresh, POLL_MS);
+    const ageId = window.setInterval(() => setAgeSeconds((value) => value + 1), 1000);
     const onVis = () => {
       if (document.visibilityState === 'visible') void refresh();
     };
     document.addEventListener('visibilitychange', onVis);
     return () => {
       window.clearInterval(id);
+      window.clearInterval(ageId);
       document.removeEventListener('visibilitychange', onVis);
     };
   }, [refresh]);
@@ -157,7 +161,7 @@ export function FactoryAgentsRosterClient({ initial }: Props) {
         <RefreshCw className={`w-3.5 h-3.5 ${error ? 'text-rose-400' : 'text-emerald-400'}`} />
         {error
           ? `refresh failed · ${error}`
-          : `auto-refresh · updated ${fmtAge((Date.now() - updatedAt) / 1000)} ago`}
+          : `auto-refresh · updated ${fmtAge(ageSeconds)} ago`}
       </div>
 
       {sorted.length === 0 ? (

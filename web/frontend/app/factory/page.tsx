@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, AlertTriangle, Bot, Building2, CheckCircle2, ChevronRight, CircleDot, Clock3, Crown, Loader2, LockKeyhole, Network, Orbit, Play, ShieldCheck, Sparkles, WalletCards } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Activity, AlertTriangle, Bot, Building2, CheckCircle2, ChevronRight, CircleDot, Clock3, Crown, Loader2, LockKeyhole, Network, Orbit, Play, RotateCcw, ShieldCheck, Sparkles, WalletCards, Wifi, WifiOff } from 'lucide-react';
 import api, { type CustomerFactoryPayload } from '@/lib/api';
 import { GlassCard } from '@/components/ui/GlassCard';
 
@@ -33,6 +33,7 @@ export default function CustomerFactoryPage() {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [ownerNote, setOwnerNote] = useState('');
   const [ownerBusy, setOwnerBusy] = useState(false);
+  const [retryBusy, setRetryBusy] = useState('');
 
   const loadFactory = useCallback(async () => {
     setLoading(true);
@@ -183,19 +184,33 @@ export default function CustomerFactoryPage() {
     }
   };
 
+
+  const retryTask = async (taskId: string) => {
+    if (!taskId) return;
+    setRetryBusy(taskId);
+    setError('');
+    try {
+      const result = await api.retryCustomerFactoryTask(taskId);
+      setNotice(result.deduplicated ? 'A recovery task is already queued for that failure.' : `Recovery task ${result.task_id} queued.`);
+      await loadFactory();
+    } catch (err: any) {
+      setError(err?.message || 'Could not retry task.');
+    } finally {
+      setRetryBusy('');
+    }
+  };
+
   const projects = factory?.projects || [];
+  const firstProjectId = factory?.projects?.[0]?.product_id || '';
   const managers = (factory?.workforce || []).filter((unit) => unit.role_class === 'manager');
   const workers = (factory?.workforce || []).filter((unit) => unit.role_class === 'worker');
   const selectedProject = projects.find((project) => project.product_id === selectedProjectId) || projects[0];
   const selectedManager = managers.find((unit) => unit.id === managerId) || managers[0];
-  const eligibleWorkers = useMemo(
-    () => workers.filter((unit) => !unit.supervisor_id || unit.supervisor_id === selectedManager?.id),
-    [workers, selectedManager?.id],
-  );
+  const eligibleWorkers = workers.filter((unit) => !unit.supervisor_id || unit.supervisor_id === selectedManager?.id);
 
   useEffect(() => {
-    if (!selectedProjectId && projects[0]?.product_id) setSelectedProjectId(projects[0].product_id);
-  }, [projects, selectedProjectId]);
+    if (!selectedProjectId && firstProjectId) setSelectedProjectId(firstProjectId);
+  }, [firstProjectId, selectedProjectId]);
 
   useEffect(() => {
     if (!managerId && managers[0]?.id) setManagerId(managers[0].id);
@@ -204,10 +219,9 @@ export default function CustomerFactoryPage() {
   useEffect(() => {
     if (!eligibleWorkers.some((unit) => unit.id === workerId)) setWorkerId(eligibleWorkers[0]?.id || '');
   }, [managerId, workerId, workers, eligibleWorkers]);
-  const activeTasks = useMemo(
-    () => projects.reduce((sum, p) => sum + Number(p.active_task_count || 0), 0),
-    [projects],
-  );
+  const activeTasks = projects.reduce((sum, p) => sum + Number(p.active_task_count || 0), 0);
+  const failedTasks = projects.reduce((sum, p) => sum + Number(p.task_summary?.failed || 0), 0);
+  const provider = factory?.provider_health;
 
   if (loading && !factory) {
     return <main className="grid min-h-screen place-items-center bg-[#02060b] text-cyan-200"><div className="flex items-center gap-2"><Loader2 className="h-5 w-5 animate-spin" />Initializing Factory…</div></main>;
@@ -247,11 +261,12 @@ export default function CustomerFactoryPage() {
           <div className="ml-auto flex items-center gap-2 text-[8px] font-bold uppercase text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-300" />Tenant isolated</div>
         </header>
 
-        <div className="mb-4 grid gap-2 sm:grid-cols-4">
+        <div className="mb-4 grid gap-2 sm:grid-cols-5">
           <GlassCard className="p-3"><p className="text-[7px] uppercase text-slate-600">Departments</p><p className="mt-1 text-xl font-black text-cyan-100">{factory.organization.department_count}</p></GlassCard>
           <GlassCard className="p-3"><p className="text-[7px] uppercase text-slate-600">Research workforce</p><p className="mt-1 text-xl font-black text-violet-100">{factory.organization.research_agent_count}</p></GlassCard>
           <GlassCard className="p-3"><p className="text-[7px] uppercase text-slate-600">Projects</p><p className="mt-1 text-xl font-black text-amber-100">{projects.length}</p></GlassCard>
           <GlassCard className="p-3"><p className="text-[7px] uppercase text-slate-600">Active tasks</p><p className="mt-1 text-xl font-black text-emerald-100">{activeTasks}</p></GlassCard>
+          <GlassCard className={`p-3 ${provider?.online ? 'border-emerald-400/20' : 'border-rose-400/25'}`}><div className="flex items-center gap-1.5">{provider?.online ? <Wifi className="h-3.5 w-3.5 text-emerald-300" /> : <WifiOff className="h-3.5 w-3.5 text-rose-300" />}<p className="text-[7px] uppercase text-slate-600">Local AI</p></div><p className={`mt-1 text-sm font-black ${provider?.online ? 'text-emerald-100' : 'text-rose-100'}`}>{provider?.online ? 'ONLINE' : 'OFFLINE'}</p><p className="mt-0.5 truncate text-[6px] text-slate-600">{provider?.models?.join(', ') || provider?.error || 'checking'}{provider?.latency_ms != null ? ` · ${provider.latency_ms}ms` : ''}</p></GlassCard>
         </div>
 
         {selectedProject ? <GlassCard className="mb-4 overflow-hidden border-cyan-300/20 p-4">
@@ -276,7 +291,7 @@ export default function CustomerFactoryPage() {
             </div>)}
           </div>
           <div className="mt-3 flex flex-wrap gap-2 text-[8px] text-slate-500">
-            <span>{selectedProject.task_summary?.completed || 0} completed</span><span>•</span><span>{selectedProject.task_summary?.running || 0} running</span><span>•</span><span>{selectedProject.task_summary?.pending || 0} queued</span>
+            <span>{selectedProject.task_summary?.completed || 0} completed</span><span>•</span><span>{selectedProject.task_summary?.running || 0} running</span><span>•</span><span>{selectedProject.task_summary?.pending || 0} queued</span><span>•</span><span className={Number(selectedProject.task_summary?.failed || 0) ? 'text-rose-300' : ''}>{selectedProject.task_summary?.failed || 0} failed</span>
           </div>
         </GlassCard> : null}
 
@@ -308,11 +323,23 @@ export default function CustomerFactoryPage() {
             <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
               {(selectedProject.timeline || []).length ? [...(selectedProject.timeline || [])].reverse().map((event) => <div key={event.id} className="flex gap-2 rounded-lg border border-white/8 bg-black/20 p-2">
                 <div className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border border-sky-400/15 bg-sky-400/5">{event.kind === 'owner_decision' ? <Crown className="h-3 w-3 text-amber-300" /> : event.kind === 'ultron_review' ? <Orbit className="h-3 w-3 text-violet-300" /> : event.status === 'completed' ? <CheckCircle2 className="h-3 w-3 text-emerald-300" /> : event.status === 'running' ? <Loader2 className="h-3 w-3 animate-spin text-cyan-300" /> : <Clock3 className="h-3 w-3 text-slate-500" />}</div>
-                <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-[8px] font-bold text-slate-200">{event.actor || 'Factory AI'}</p><span className="ml-auto text-[6px] uppercase text-slate-600">{event.timestamp ? new Date(event.timestamp * 1000).toLocaleString() : ''}</span></div><p className="mt-0.5 text-[8px] text-slate-400">{event.label || event.kind}</p>{event.evidence_count ? <p className="mt-0.5 text-[7px] text-emerald-300">{event.evidence_count} evidence items</p> : null}</div>
+                <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-[8px] font-bold text-slate-200">{event.actor || 'Factory AI'}</p><span className="ml-auto text-[6px] uppercase text-slate-600">{event.timestamp ? new Date(event.timestamp * 1000).toLocaleString() : ''}</span></div><p className="mt-0.5 text-[8px] text-slate-400">{event.label || event.kind}</p>{event.evidence_count ? <p className="mt-0.5 text-[7px] text-emerald-300">{event.evidence_count} evidence items</p> : null}{event.error ? <p className="mt-1 line-clamp-2 text-[7px] text-rose-300">{event.error}</p> : null}{event.retry_count ? <p className="mt-0.5 text-[6px] uppercase text-slate-600">Retry {event.retry_count}</p> : null}{event.retryable && event.task_id ? <button type="button" disabled={retryBusy === event.task_id} onClick={() => void retryTask(event.task_id || '')} className="mt-1 flex items-center gap-1 rounded border border-rose-400/20 bg-rose-400/8 px-2 py-1 text-[6px] font-black uppercase text-rose-100 disabled:opacity-40"><RotateCcw className={`h-2.5 w-2.5 ${retryBusy === event.task_id ? 'animate-spin' : ''}`} />Retry task</button> : null}</div>
               </div>) : <p className="text-[9px] text-slate-600">No persisted mission events yet.</p>}
             </div>
           </GlassCard>
         </div> : null}
+
+        <div className="mb-4 grid gap-3 lg:grid-cols-[.8fr_1.2fr]">
+          <GlassCard className={`p-4 ${provider?.online ? 'border-emerald-400/15' : 'border-rose-400/25'}`}>
+            <div className="flex items-center gap-2">{provider?.online ? <Wifi className="h-4 w-4 text-emerald-300" /> : <WifiOff className="h-4 w-4 text-rose-300" />}<p className="text-xs font-black uppercase">Provider Health</p><span className="ml-auto text-[7px] uppercase text-slate-500">{provider?.version ? `Ollama ${provider.version}` : 'local provider'}</span></div>
+            <p className="mt-2 text-[9px] text-slate-400">{provider?.online ? `Ready · ${provider.models?.join(', ') || 'model loaded'} · ${provider.latency_ms || 0}ms` : `Provider unavailable${provider?.error ? ` · ${provider.error}` : ''}`}</p>
+            <p className="mt-1 text-[7px] text-slate-600">Observed recoveries: {provider?.recovery_count || 0}{provider?.last_recovered_at ? ` · last ${new Date(provider.last_recovered_at * 1000).toLocaleString()}` : ''}</p>
+          </GlassCard>
+          <GlassCard className={`p-4 ${failedTasks ? 'border-rose-400/20' : 'border-cyan-400/15'}`}>
+            <div className="flex items-center gap-2"><Activity className="h-4 w-4 text-cyan-300" /><p className="text-xs font-black uppercase">Operations Pulse</p><span className="ml-auto text-[7px] uppercase text-slate-500">{activeTasks} active · {failedTasks} failed</span></div>
+            <div className="mt-3 flex items-center gap-2 overflow-hidden">{(selectedProject?.active_tasks || []).slice(0, 6).map((task, index) => <React.Fragment key={task.id || index}><div className="min-w-0 flex-1 rounded-lg border border-cyan-400/15 bg-cyan-400/5 p-2"><div className="flex items-center gap-1"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300" /><p className="truncate text-[7px] font-black uppercase text-cyan-100">{task.assigned_to || task.agent_type || 'AI worker'}</p></div><p className="mt-1 truncate text-[6px] uppercase text-slate-600">{task.status || 'queued'}</p></div>{index < Math.min((selectedProject?.active_tasks || []).length, 6) - 1 ? <ChevronRight className="h-3 w-3 shrink-0 animate-pulse text-cyan-400/50" /> : null}</React.Fragment>)}{!(selectedProject?.active_tasks || []).length ? <p className="text-[8px] text-slate-600">No active task movement for this mission. Completed work remains in Audit Replay.</p> : null}</div>
+          </GlassCard>
+        </div>
 
         <GlassCard className="mb-4 border-cyan-400/20 p-4">
           <div className="flex items-start gap-3">
