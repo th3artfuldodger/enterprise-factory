@@ -176,10 +176,14 @@ def delegate_customer_manager_task(
 ) -> dict[str, Any]:
     manager = _profile(customer_id, manager_id)
     worker = _profile(customer_id, worker_id)
-    if not manager or manager.get("role_class") != "manager":
-        raise ValueError("AI manager not found in this customer Factory")
-    if not worker or worker.get("role_class") != "worker":
-        raise ValueError("AI worker not found in this customer Factory")
+    if not manager or manager.get("role_class") != "manager" or manager.get("disabled"):
+        raise ValueError("AI manager not found or disabled in this customer Factory")
+    if "assign_work" not in (manager.get("permissions") or []):
+        raise ValueError("This AI manager does not have assign_work permission")
+    if not worker or worker.get("role_class") != "worker" or worker.get("disabled"):
+        raise ValueError("AI worker not found or disabled in this customer Factory")
+    if "perform_assigned_work" not in (worker.get("permissions") or []):
+        raise ValueError("This AI worker cannot perform assigned work")
     existing = str(worker.get("supervisor_id") or "")
     if existing and existing != manager_id:
         raise ValueError("This worker already reports to another manager")
@@ -233,3 +237,17 @@ def delegate_customer_manager_task(
         "worker_label": worker.get("label"),
         "status": "pending",
     }
+
+
+def set_customer_personnel_enabled(customer_id: str, agent_id: str, enabled: bool) -> dict[str, Any]:
+    doc = _read(customer_id)
+    profiles = doc.get("profiles") or {}
+    row = dict(profiles.get(agent_id) or {})
+    if not row:
+        raise ValueError("AI unit not found in this customer Factory")
+    row["disabled"] = not bool(enabled)
+    row["updated_at"] = time.time()
+    profiles[agent_id] = row
+    doc["profiles"] = profiles
+    _write(customer_id, doc)
+    return {"id": agent_id, **row}

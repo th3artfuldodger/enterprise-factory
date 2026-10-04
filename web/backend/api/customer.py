@@ -24,6 +24,9 @@ from web.backend.schemas.api_requests import (
     CustomerPersonnelRequest,
     CustomerManagerDelegationRequest,
     CustomerOwnerDecisionRequest,
+    CustomerProjectControlRequest,
+    CustomerPersonnelControlRequest,
+    CustomerOnboardingRequest,
     CustomerLoginRequest,
     CustomerRegisterRequest,
     DemoNoteCreateRequest,
@@ -63,6 +66,14 @@ def _enforce_register_rate_limit(ip: str) -> None:
     if len(window) >= _REG_MAX_PER_HOUR:
         raise HTTPException(status_code=429, detail="Too many registration attempts. Try again later.")
     window.append(now)
+
+
+def _enforce_factory_write_limit(customer_id: str, bucket: str, *, max_hits: int = 60, window_seconds: float = 3600.0) -> None:
+    from web.backend.services.shared_rate_limit import enforce_shared_rate_limit
+    enforce_shared_rate_limit(
+        f"customer-factory:{customer_id}:{bucket}", max_hits=max_hits, window_seconds=window_seconds,
+        detail="Too many Factory actions. Try again shortly.",
+    )
 
 
 CUSTOMER_SESSION_COOKIE = "customer_token"
@@ -410,7 +421,17 @@ async def customer_factory(payload: dict = Depends(_get_token_payload)):
     tasks = list(state.get("task_queue") or [])
     funding_requests = list_requests(workspace_id=ws, limit=500)
     from web.backend.services.provider_health import local_ollama_health
+    from web.backend.services.customer_factory_establishment import (
+        limits_for, maybe_daily_snapshot, read_audit, snapshot_status, stall_for, usage_summary, audit_provider_transition, MISSION_TEMPLATES,
+    )
     provider_health = local_ollama_health()
+    audit_provider_transition(customer_id, provider_health)
+    profile = commerce.get_customer(customer_id) or {}
+    plan = str(profile.get("plan") or "free").lower()
+    try:
+        maybe_daily_snapshot(customer_id)
+    except Exception:
+        logger.exception("Tenant daily snapshot failed for %s", ws)
     active_by_product: dict[str, list[dict]] = {}
     for task in tasks:
         pid = str(task.get("product_id") or "")
@@ -501,12 +522,18 @@ async def customer_factory(payload: dict = Depends(_get_token_payload)):
                 "owner_decision": product.get("owner_decision"),
                 "funding_requests": project_funding[:20],
                 "task_summary": status_counts,
-                "timeline": timeline[-100:],
+                "timeline": timeline[-limits_for(plan)["history"]:],
+                "stall": stall_for(product, product_tasks),
+                "paused": bool(product.get("factory_paused")),
+                "archived": bool(product.get("archived")),
             }
         )
 
     from web.backend.services.customer_workforce import list_customer_personnel
     workforce = list_customer_personnel(customer_id)
+    usage = usage_summary(customer_id, plan, workforce)
+    from web.backend.services.customer_factory_canary import read_customer_factory_canary
+    qa_canary = read_customer_factory_canary()
     return {
         "workspace_id": ws,
         "tenant_isolated": True,
@@ -516,6 +543,13 @@ async def customer_factory(payload: dict = Depends(_get_token_payload)):
         "workforce": workforce,
         "funding": funding_status_summary(workspace_id=ws),
         "provider_health": provider_health,
+        "plan": plan,
+        "usage": usage,
+        "mission_templates": MISSION_TEMPLATES,
+        "audit_log": read_audit(customer_id, limit=100),
+        "backup": snapshot_status(customer_id),
+        "qa_canary": qa_canary,
+        "model_failover": {"router_enabled": True, "primary": "local_ollama", "degraded_mode": not bool(provider_health.get("online")), "note": "Router failover is used when another configured authenticated provider is available; otherwise tasks remain recoverable instead of gaining unsafe authority."},
         "customer_permissions": {
             "may_create_projects": True,
             "may_create_ai_personnel": True,
@@ -556,14 +590,23 @@ async def customer_create_personnel(
     body: CustomerPersonnelRequest,
     payload: dict = Depends(_get_token_payload),
 ):
-    from web.backend.services.customer_workforce import create_customer_personnel
+    from web.backend.services.customer_workforce import create_customer_personnel, list_customer_personnel
+    from web.backend.services.customer_factory_establishment import enforce_capacity, emit_audit
+    customer_id = str(payload["sub"]); _enforce_factory_write_limit(customer_id, "personnel", max_hits=30)
+    plan = str((commerce.get_customer(customer_id) or {}).get("plan") or "free").lower()
+    workforce = list_customer_personnel(customer_id)
     try:
-        return create_customer_personnel(
+        enforce_capacity(customer_id, plan, "personnel", workforce)
+        if body.role_class == "manager":
+            enforce_capacity(customer_id, plan, "manager", workforce)
+        row = create_customer_personnel(
             str(payload["sub"]),
             body.description,
             role_class=body.role_class,
             label=body.label,
         )
+        emit_audit(customer_id, "personnel_created", detail={"personnel_id": row.get("id"), "role_class": row.get("role_class")})
+        return row
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
 
@@ -574,15 +617,21 @@ async def customer_manager_delegate(
     body: CustomerManagerDelegationRequest,
     payload: dict = Depends(_get_token_payload),
 ):
-    from web.backend.services.customer_workforce import delegate_customer_manager_task
+    from web.backend.services.customer_workforce import delegate_customer_manager_task, list_customer_personnel
+    from web.backend.services.customer_factory_establishment import emit_audit, enforce_capacity
+    customer_id = str(payload["sub"]); _enforce_factory_write_limit(customer_id, "delegate", max_hits=120)
+    plan=str((commerce.get_customer(customer_id) or {}).get("plan") or "free").lower()
     try:
-        return delegate_customer_manager_task(
-            str(payload["sub"]),
+        enforce_capacity(customer_id,plan,"active_task",list_customer_personnel(customer_id))
+        result = delegate_customer_manager_task(
+            customer_id,
             manager_id=manager_id,
             worker_id=body.worker_id,
             product_id=body.product_id,
             directive=body.directive,
         )
+        emit_audit(customer_id, "manager_delegation", actor=manager_id, product_id=body.product_id, task_id=result.get("task_id"), detail={"worker_id": body.worker_id})
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
 
@@ -593,8 +642,13 @@ async def customer_factory_retry_task(
     payload: dict = Depends(_get_token_payload),
 ):
     from web.backend.services.customer_task_recovery import retry_customer_task
+    from web.backend.services.customer_factory_establishment import emit_audit, limits_for
+    customer_id=str(payload["sub"]); plan=str((commerce.get_customer(customer_id) or {}).get("plan") or "free").lower()
+    _enforce_factory_write_limit(customer_id, "retry", max_hits=limits_for(plan)["retries_per_hour"], window_seconds=3600)
     try:
-        return retry_customer_task(str(payload["sub"]), task_id)
+        result=retry_customer_task(customer_id, task_id)
+        emit_audit(customer_id, "task_retry", task_id=result.get("task_id"), detail={"retry_of": task_id, "deduplicated": result.get("deduplicated")})
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
 
@@ -608,7 +662,7 @@ async def customer_factory_owner_decision(
     """Record a non-financial owner decision for a mission package."""
     from web.backend.services.tenant_workspaces import read_customer_pipeline_state, write_customer_product
 
-    customer_id = str(payload["sub"])
+    customer_id = str(payload["sub"]); _enforce_factory_write_limit(str(payload["sub"]), "owner-decision", max_hits=60)
     state = read_customer_pipeline_state(customer_id)
     product = (state.get("products") or {}).get(product_id)
     if not product:
@@ -628,6 +682,8 @@ async def customer_factory_owner_decision(
     if body.action == "archive":
         product["archived"] = True
     write_customer_product(customer_id, product)
+    from web.backend.services.customer_factory_establishment import emit_audit
+    emit_audit(customer_id, "owner_decision", product_id=product_id, detail={"action": body.action})
     return {"decision": decision, "financial_authority": False, "may_move_money": False}
 
 
@@ -638,16 +694,22 @@ async def customer_factory_mission(
 ):
     """Turn a customer prompt into a five-lens department mission + management reviews."""
     from web.backend.services.empire_missions import create_customer_mission
+    from web.backend.services.customer_factory_establishment import enforce_mission_capacity, emit_audit
     from web.backend.services.prompt_safety import (
         prepare_untrusted_plain_text,
         rejection_reason_if_blocked,
     )
 
     customer_id = str(payload["sub"])
+    _enforce_factory_write_limit(customer_id, "mission", max_hits=20)
     profile = commerce.get_customer(customer_id)
     if not profile:
         raise HTTPException(status_code=401, detail="Customer not found")
     plan = str(profile.get("plan") or "free").lower()
+    try:
+        enforce_mission_capacity(customer_id, plan)
+    except ValueError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
     if plan == "free":
         quota = commerce.consume_monthly_run(customer_id, limit=3)
         if not quota.get("allowed"):
@@ -665,6 +727,7 @@ async def customer_factory_mission(
         result = create_customer_mission(customer_id, prompt)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+    emit_audit(customer_id, "mission_created", product_id=result.get("product_id"), detail={"department": result.get("department")})
     return {**result, "plan": plan, "tenant_isolated": True}
 
 
@@ -676,17 +739,20 @@ async def customer_factory_funding_scout(
     from web.backend.services.funding_scouts import discover_funding_opportunities
     from web.backend.services.tenant_workspaces import customer_workspace_id, read_customer_pipeline_state
 
-    customer_id = str(payload["sub"])
+    customer_id = str(payload["sub"]); _enforce_factory_write_limit(str(payload["sub"]), "funding-scout", max_hits=12)
     state = read_customer_pipeline_state(customer_id)
     product = (state.get("products") or {}).get(product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Project not found")
-    return await asyncio.to_thread(
+    result = await asyncio.to_thread(
         discover_funding_opportunities,
         workspace_id=customer_workspace_id(customer_id),
         project_idea=str(product.get("idea") or ""),
         product_id=product_id,
     )
+    from web.backend.services.customer_factory_establishment import emit_audit
+    emit_audit(customer_id, "funding_scout", product_id=product_id, detail={"opportunities_found": result.get("opportunities_found", 0) if isinstance(result, dict) else 0})
+    return result
 
 
 @router.post("/factory/funding/request")
@@ -698,7 +764,7 @@ async def customer_factory_funding_request(
     from web.backend.services.funding_utility import submit_funding_request
     from web.backend.services.tenant_workspaces import customer_workspace_id
 
-    customer_id = str(payload["sub"])
+    customer_id = str(payload["sub"]); _enforce_factory_write_limit(str(payload["sub"]), "funding-request", max_hits=30)
     ws = customer_workspace_id(customer_id)
     try:
         request = submit_funding_request(
@@ -717,11 +783,74 @@ async def customer_factory_funding_request(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+    from web.backend.services.customer_factory_establishment import emit_audit
+    emit_audit(customer_id, "funding_request", product_id=body.product_id, detail={"request_id": request.get("id") if isinstance(request, dict) else None, "amount_usd": body.amount_usd, "customer_may_authorize": False})
     return {
         "request": request,
         "authorization": "pending_funding_utility",
         "customer_may_authorize": False,
     }
+
+
+@router.get("/factory/templates")
+async def customer_factory_templates(payload: dict = Depends(_get_token_payload)):
+    from web.backend.services.customer_factory_establishment import MISSION_TEMPLATES
+    return {"templates": MISSION_TEMPLATES}
+
+
+@router.post("/factory/onboarding")
+async def customer_factory_onboarding(body: CustomerOnboardingRequest, payload: dict = Depends(_get_token_payload)):
+    from web.backend.services.customer_factory_establishment import onboarding
+    customer_id=str(payload["sub"]); _enforce_factory_write_limit(customer_id,"onboarding",max_hits=5)
+    plan=str((commerce.get_customer(customer_id) or {}).get("plan") or "free").lower()
+    if plan == "free":
+        quota=commerce.consume_monthly_run(customer_id,limit=3)
+        if not quota.get("allowed"): raise HTTPException(status_code=402,detail="Free tier limit reached (3 pipeline runs/month). Upgrade required.")
+    try: return onboarding(customer_id, body.goal, plan)
+    except ValueError as exc: raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory/projects/{product_id}/control")
+async def customer_factory_project_control(product_id: str, body: CustomerProjectControlRequest, payload: dict = Depends(_get_token_payload)):
+    from web.backend.services.customer_factory_establishment import project_control
+    customer_id=str(payload["sub"]); _enforce_factory_write_limit(customer_id,"control",max_hits=60)
+    try: return project_control(customer_id, product_id, body.action)
+    except ValueError as exc: raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory/projects/{product_id}/auto-delegate")
+async def customer_factory_auto_delegate(product_id: str, payload: dict = Depends(_get_token_payload)):
+    from web.backend.services.customer_factory_establishment import auto_delegate
+    customer_id=str(payload["sub"]); _enforce_factory_write_limit(customer_id,"auto-delegate",max_hits=30)
+    try: return auto_delegate(customer_id, product_id)
+    except ValueError as exc: raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory/projects/{product_id}/retry-failed")
+async def customer_factory_retry_failed(product_id: str, payload: dict = Depends(_get_token_payload)):
+    from web.backend.services.customer_factory_establishment import retry_failed_for_project, limits_for
+    customer_id=str(payload["sub"]); plan=str((commerce.get_customer(customer_id) or {}).get("plan") or "free").lower()
+    _enforce_factory_write_limit(customer_id,"retry",max_hits=limits_for(plan)["retries_per_hour"],window_seconds=3600)
+    try: return retry_failed_for_project(customer_id,product_id)
+    except ValueError as exc: raise HTTPException(status_code=400,detail=client_error_detail(exc)) from exc
+
+
+@router.post("/factory/personnel/{agent_id}/control")
+async def customer_factory_personnel_control(agent_id: str, body: CustomerPersonnelControlRequest, payload: dict = Depends(_get_token_payload)):
+    from web.backend.services.customer_workforce import set_customer_personnel_enabled
+    from web.backend.services.customer_factory_establishment import emit_audit
+    customer_id=str(payload["sub"]); _enforce_factory_write_limit(customer_id,"personnel-control",max_hits=60)
+    try: row=set_customer_personnel_enabled(customer_id,agent_id,body.enabled)
+    except ValueError as exc: raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
+    emit_audit(customer_id,"personnel_enabled" if body.enabled else "personnel_disabled",detail={"personnel_id":agent_id})
+    return row
+
+
+@router.post("/factory/backup")
+async def customer_factory_backup(payload: dict = Depends(_get_token_payload)):
+    from web.backend.services.customer_factory_establishment import tenant_snapshot
+    customer_id=str(payload["sub"]); _enforce_factory_write_limit(customer_id,"backup",max_hits=6)
+    return tenant_snapshot(customer_id)
 
 
 @router.post("/pipeline/run")

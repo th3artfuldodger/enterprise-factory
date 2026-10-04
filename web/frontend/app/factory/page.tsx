@@ -34,6 +34,11 @@ export default function CustomerFactoryPage() {
   const [ownerNote, setOwnerNote] = useState('');
   const [ownerBusy, setOwnerBusy] = useState(false);
   const [retryBusy, setRetryBusy] = useState('');
+  const [controlBusy, setControlBusy] = useState('');
+  const [onboardGoal, setOnboardGoal] = useState('');
+  const [onboardBusy, setOnboardBusy] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [personnelBusy, setPersonnelBusy] = useState('');
 
   const loadFactory = useCallback(async () => {
     setLoading(true);
@@ -200,10 +205,51 @@ export default function CustomerFactoryPage() {
     }
   };
 
+  const controlProject = async (action: 'pause' | 'resume' | 'archive' | 'restore') => {
+    if (!selectedProject) return;
+    setControlBusy(action); setError('');
+    try { await api.controlCustomerFactoryProject(selectedProject.product_id, action); setNotice(`Mission ${action} recorded.`); await loadFactory(); }
+    catch (err: any) { setError(err?.message || 'Mission control failed.'); }
+    finally { setControlBusy(''); }
+  };
+
+  const recoverProject = async (mode: 'retry' | 'delegate') => {
+    if (!selectedProject) return;
+    setControlBusy(mode); setError('');
+    try {
+      const result = mode === 'retry' ? await api.retryFailedCustomerFactoryProject(selectedProject.product_id) : await api.autoDelegateCustomerFactoryProject(selectedProject.product_id);
+      setNotice(mode === 'retry' ? `${result.queued || 0} recovery task(s) queued.` : `Manager assigned recovery work to ${result.worker_label || 'a subordinate'}.`);
+      await loadFactory();
+    } catch (err: any) { setError(err?.message || 'Recovery action failed.'); }
+    finally { setControlBusy(''); }
+  };
+
+  const runOnboarding = async () => {
+    if (onboardGoal.trim().length < 8) return;
+    setOnboardBusy(true); setError('');
+    try { const result = await api.onboardCustomerFactory(onboardGoal.trim()); setNotice(`Factory established. First mission ${result.mission?.product_id || ''} is queued.`); setOnboardGoal(''); await loadFactory(); }
+    catch (err: any) { setError(err?.message || 'Factory onboarding failed.'); }
+    finally { setOnboardBusy(false); }
+  };
+
+  const runBackup = async () => {
+    setBackupBusy(true); setError('');
+    try { const result = await api.backupCustomerFactory(); setNotice(`Tenant backup created: ${result.filename || 'snapshot'}.`); await loadFactory(); }
+    catch (err: any) { setError(err?.message || 'Backup failed.'); }
+    finally { setBackupBusy(false); }
+  };
+
+  const togglePersonnel = async (agentId: string, enabled: boolean) => {
+    setPersonnelBusy(agentId); setError('');
+    try { await api.setCustomerFactoryPersonnelEnabled(agentId, enabled); setNotice(`AI unit ${enabled ? 'enabled' : 'disabled'}.`); await loadFactory(); }
+    catch (err: any) { setError(err?.message || 'Personnel control failed.'); }
+    finally { setPersonnelBusy(''); }
+  };
+
   const projects = factory?.projects || [];
   const firstProjectId = factory?.projects?.[0]?.product_id || '';
-  const managers = (factory?.workforce || []).filter((unit) => unit.role_class === 'manager');
-  const workers = (factory?.workforce || []).filter((unit) => unit.role_class === 'worker');
+  const managers = (factory?.workforce || []).filter((unit) => unit.role_class === 'manager' && !unit.disabled);
+  const workers = (factory?.workforce || []).filter((unit) => unit.role_class === 'worker' && !unit.disabled);
   const selectedProject = projects.find((project) => project.product_id === selectedProjectId) || projects[0];
   const selectedManager = managers.find((unit) => unit.id === managerId) || managers[0];
   const eligibleWorkers = workers.filter((unit) => !unit.supervisor_id || unit.supervisor_id === selectedManager?.id);
@@ -268,6 +314,29 @@ export default function CustomerFactoryPage() {
           <GlassCard className="p-3"><p className="text-[7px] uppercase text-slate-600">Active tasks</p><p className="mt-1 text-xl font-black text-emerald-100">{activeTasks}</p></GlassCard>
           <GlassCard className={`p-3 ${provider?.online ? 'border-emerald-400/20' : 'border-rose-400/25'}`}><div className="flex items-center gap-1.5">{provider?.online ? <Wifi className="h-3.5 w-3.5 text-emerald-300" /> : <WifiOff className="h-3.5 w-3.5 text-rose-300" />}<p className="text-[7px] uppercase text-slate-600">Local AI</p></div><p className={`mt-1 text-sm font-black ${provider?.online ? 'text-emerald-100' : 'text-rose-100'}`}>{provider?.online ? 'ONLINE' : 'OFFLINE'}</p><p className="mt-0.5 truncate text-[6px] text-slate-600">{provider?.models?.join(', ') || provider?.error || 'checking'}{provider?.latency_ms != null ? ` · ${provider.latency_ms}ms` : ''}</p></GlassCard>
         </div>
+
+        <div className="mb-4 grid gap-3 lg:grid-cols-[1.15fr_.85fr]">
+          <GlassCard className="border-cyan-400/15 p-4">
+            <div className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-cyan-300" /><p className="text-xs font-black uppercase">Factory Capacity · {String(factory.plan || 'free').toUpperCase()}</p><span className="ml-auto text-[7px] uppercase text-slate-500">enforced server-side</span></div>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[['Projects', factory.usage?.projects || 0, factory.usage?.limits?.projects || 0], ['AI Units', factory.usage?.personnel || 0, factory.usage?.limits?.personnel || 0], ['Active Tasks', factory.usage?.active_tasks || 0, factory.usage?.limits?.active_tasks || 0], ['LLM Calls', factory.usage?.llm_calls || 0, null]].map(([label, used, limit]) => <div key={String(label)} className="rounded-lg border border-white/8 bg-black/25 p-2"><p className="text-[6px] uppercase text-slate-600">{label}</p><p className="mt-1 text-sm font-black text-cyan-100">{String(used)}{limit ? ` / ${limit}` : ''}</p>{limit ? <div className="mt-1 h-1 overflow-hidden rounded bg-white/5"><div className="h-full bg-cyan-300/60" style={{ width: `${Math.min(100, (Number(used) / Number(limit)) * 100)}%` }} /></div> : null}</div>)}
+            </div>
+            <p className="mt-2 text-[7px] text-slate-600">Tokens: {(factory.usage?.llm_tokens || 0).toLocaleString()} · estimated model cost ${Number(factory.usage?.llm_estimated_cost_usd || 0).toFixed(4)} · retries {factory.usage?.task_retries || 0}</p>
+          </GlassCard>
+          <GlassCard className={`p-4 ${factory.qa_canary?.ok ? 'border-emerald-400/15' : 'border-amber-400/20'}`}>
+            <div className="flex items-center gap-2"><Activity className="h-4 w-4 text-emerald-300" /><p className="text-xs font-black uppercase">Durability & Canary</p><span className={`ml-auto text-[7px] font-black uppercase ${factory.qa_canary?.ok ? 'text-emerald-300' : 'text-amber-300'}`}>{factory.qa_canary?.ok ? 'QA PASS' : 'QA CHECKING'}</span></div>
+            <p className="mt-2 text-[8px] text-slate-400">Backups: {factory.backup?.count || 0}{factory.backup?.latest?.created_at ? ` · latest ${new Date(factory.backup.latest.created_at * 1000).toLocaleString()}` : ''}</p>
+            <p className="mt-1 text-[7px] text-slate-600">Model failover: {factory.model_failover?.degraded_mode ? 'degraded/recoverable' : 'ready'} · financial authority remains disabled.</p>
+            <button type="button" disabled={backupBusy} onClick={() => void runBackup()} className="mt-2 rounded border border-sky-400/20 bg-sky-400/8 px-2 py-1.5 text-[7px] font-black uppercase text-sky-100 disabled:opacity-40">{backupBusy ? 'Backing up…' : 'Create tenant snapshot'}</button>
+          </GlassCard>
+        </div>
+
+        {projects.length === 0 ? <GlassCard className="mb-4 border-violet-400/20 p-4">
+          <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-violet-300" /><p className="text-xs font-black uppercase text-violet-100">First-Run Factory Setup</p></div>
+          <p className="mt-1 text-[9px] text-slate-500">Give the Factory your business goal. It will create a starter manager/workforce and launch the first evidence mission within your plan limits.</p>
+          <textarea value={onboardGoal} onChange={(e) => setOnboardGoal(e.target.value)} rows={3} placeholder="What do you want this Factory to accomplish?" className="mt-3 w-full rounded-lg border border-white/10 bg-black/45 px-3 py-2 text-[10px] outline-none focus:border-violet-400/40" />
+          <button type="button" disabled={onboardBusy || onboardGoal.trim().length < 8} onClick={() => void runOnboarding()} className="mt-2 rounded border border-violet-400/25 bg-violet-400/10 px-3 py-2 text-[8px] font-black uppercase text-violet-100 disabled:opacity-40">{onboardBusy ? 'Establishing…' : 'Establish my Factory'}</button>
+        </GlassCard> : null}
 
         {selectedProject ? <GlassCard className="mb-4 overflow-hidden border-cyan-300/20 p-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -347,6 +416,7 @@ export default function CustomerFactoryPage() {
             <div className="flex-1">
               <p className="text-xs font-black uppercase tracking-[.18em] text-cyan-100">Give the Factory a mission</p>
               <p className="mt-1 text-[10px] text-slate-400">Describe the outcome. The system chooses a department, deploys Need, Money, Competition, AI Advantage and Feasibility scouts, then routes the evidence through its manager and Ultron before production.</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">{(factory.mission_templates || []).map((template) => <button key={template.id} type="button" onClick={() => setMission(template.prompt)} className="rounded border border-white/10 bg-white/5 px-2 py-1 text-[6px] font-black uppercase text-slate-400 hover:border-cyan-400/25 hover:text-cyan-100">{template.label}</button>)}</div>
               <textarea value={mission} onChange={(e) => setMission(e.target.value)} rows={3} placeholder="Example: Build a system that helps independent roofers find high-value leads and prepare a marketing campaign…" className="mt-3 w-full resize-none rounded-lg border border-white/10 bg-black/45 px-3 py-3 text-sm outline-none placeholder:text-slate-700 focus:border-cyan-400/45" />
               <button type="button" disabled={missionBusy || mission.trim().length < 8} onClick={() => void launchMission()} className="mt-2 flex items-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-400/15 px-4 py-2.5 text-[9px] font-black uppercase text-cyan-100 disabled:opacity-40">{missionBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}Launch Mission</button>
               {notice ? <p className="mt-2 text-sm text-emerald-300">{notice}</p> : null}
@@ -363,7 +433,7 @@ export default function CustomerFactoryPage() {
             </div>
             <textarea value={unitPrompt} onChange={(e) => setUnitPrompt(e.target.value)} rows={2} placeholder={unitRole === 'manager' ? 'Example: A manager that oversees my competitor research workers…' : 'Example: An AI that researches competitor pricing and positioning…'} className="mt-2 w-full resize-none rounded-lg border border-white/10 bg-black/45 px-3 py-2 text-[10px] outline-none placeholder:text-slate-700 focus:border-violet-400/40" />
             <button type="button" disabled={unitBusy || unitPrompt.trim().length < 3} onClick={() => void createUnit()} className="mt-2 flex items-center gap-2 rounded border border-violet-400/25 bg-violet-400/10 px-3 py-2 text-[8px] font-black uppercase text-violet-100 disabled:opacity-40">{unitBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}Create {unitRole}</button>
-            {(factory.workforce || []).length ? <div className="mt-3 grid gap-1.5 sm:grid-cols-2">{(factory.workforce || []).map((unit) => <button key={unit.id} type="button" onClick={() => { if (unit.role_class === 'manager') setManagerId(unit.id); else if (unit.supervisor_id) { setManagerId(unit.supervisor_id); setWorkerId(unit.id); } }} className={`rounded border px-2 py-2 text-left transition ${unit.role_class === 'manager' && managerId === unit.id ? 'border-emerald-300/35 bg-emerald-400/10' : workerId === unit.id ? 'border-cyan-300/30 bg-cyan-400/8' : 'border-white/10 bg-black/25 hover:border-white/20'}`}><span className="flex items-center gap-1.5 text-[8px] font-black text-slate-200">{unit.role_class === 'manager' ? <Crown className="h-3 w-3 text-amber-300" /> : <Bot className="h-3 w-3 text-violet-300" />}{unit.label}</span><span className="mt-1 block text-[6px] uppercase text-slate-600">{unit.role_class}{unit.supervisor_label ? ` · reports to ${unit.supervisor_label}` : ''}</span></button>)}</div> : null}
+            {(factory.workforce || []).length ? <div className="mt-3 grid gap-1.5 sm:grid-cols-2">{(factory.workforce || []).map((unit) => <div key={unit.id} className={`rounded border px-2 py-2 text-left transition ${unit.disabled ? 'border-rose-400/15 bg-rose-400/5 opacity-60' : unit.role_class === 'manager' && managerId === unit.id ? 'border-emerald-300/35 bg-emerald-400/10' : workerId === unit.id ? 'border-cyan-300/30 bg-cyan-400/8' : 'border-white/10 bg-black/25'}`}><button type="button" disabled={unit.disabled} onClick={() => { if (unit.role_class === 'manager') setManagerId(unit.id); else if (unit.supervisor_id) { setManagerId(unit.supervisor_id); setWorkerId(unit.id); } }} className="w-full text-left disabled:cursor-not-allowed"><span className="flex items-center gap-1.5 text-[8px] font-black text-slate-200">{unit.role_class === 'manager' ? <Crown className="h-3 w-3 text-amber-300" /> : <Bot className="h-3 w-3 text-violet-300" />}{unit.label}</span><span className="mt-1 block text-[6px] uppercase text-slate-600">{unit.role_class}{unit.supervisor_label ? ` · reports to ${unit.supervisor_label}` : ''}{unit.disabled ? ' · disabled' : ''}</span></button><button type="button" disabled={personnelBusy === unit.id} onClick={() => void togglePersonnel(unit.id, Boolean(unit.disabled))} className="mt-1 rounded border border-white/10 bg-black/20 px-1.5 py-0.5 text-[6px] font-black uppercase text-slate-500 hover:text-white disabled:opacity-40">{unit.disabled ? 'Enable' : 'Disable'}</button></div>)}</div> : null}
           </GlassCard>
 
           <GlassCard className="border-emerald-400/20 p-4">
@@ -412,6 +482,11 @@ export default function CustomerFactoryPage() {
             </GlassCard>
           </div>
         </div>
+
+        <GlassCard className="mt-4 border-slate-400/10 p-4">
+          <div className="flex items-center gap-2"><Clock3 className="h-4 w-4 text-slate-300" /><p className="text-xs font-black uppercase text-slate-200">Factory Audit Log</p><span className="ml-auto text-[7px] uppercase text-slate-600">persistent · tenant scoped</span></div>
+          <div className="mt-3 grid gap-1.5 md:grid-cols-2">{(factory.audit_log || []).slice(-10).reverse().map((event) => <div key={event.id} className="rounded border border-white/8 bg-black/20 px-2 py-2"><div className="flex gap-2"><p className="text-[7px] font-black uppercase text-slate-300">{event.event.replace(/_/g, ' ')}</p><span className="ml-auto text-[6px] text-slate-600">{new Date(event.timestamp * 1000).toLocaleString()}</span></div><p className="mt-0.5 truncate text-[6px] text-slate-600">{event.actor || 'owner'}{event.product_id ? ` · ${event.product_id}` : ''}{event.task_id ? ` · ${event.task_id}` : ''}</p></div>)}{!(factory.audit_log || []).length ? <p className="text-[8px] text-slate-600">Audit events will appear as Factory actions occur.</p> : null}</div>
+        </GlassCard>
 
         <GlassCard className="mt-4 p-4">
           <div className="mb-3 flex items-center gap-2"><Crown className="h-4 w-4 text-amber-300" /><p className="text-xs font-black uppercase text-amber-100">Mission Board</p><span className="ml-auto text-[7px] uppercase text-slate-600">Select a mission for command view</span></div>

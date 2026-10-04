@@ -175,6 +175,23 @@ class CustomerOwnerDecisionRequest(StrictRequestModel):
     note: Optional[str] = Field(None, max_length=2000)
 
 
+class CustomerProjectControlRequest(StrictRequestModel):
+    action: Literal["pause", "resume", "archive", "restore"]
+
+
+class CustomerPersonnelControlRequest(StrictRequestModel):
+    enabled: bool
+
+
+class CustomerOnboardingRequest(StrictRequestModel):
+    goal: str = Field(..., min_length=8, max_length=8000)
+
+    @field_validator("goal")
+    @classmethod
+    def strip_goal(cls, v: str) -> str:
+        return v.strip()
+
+
 class DemoNoteCreateRequest(StrictRequestModel):
     title: str = Field(..., min_length=1, max_length=500)
     body: str = Field("", max_length=8000)

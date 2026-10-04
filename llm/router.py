@@ -109,6 +109,16 @@ class LLMRouter:
                     continue
 
                 provider_type = pconf.get("provider_type", "openai_compatible")
+                # Remote providers that declare a credential source are not usable
+                # merely because a public health/models endpoint responds. Loading an
+                # unauthenticated cloud backend makes failover select something that
+                # will predictably 401 at generation time. Local OpenAI-compatible
+                # endpoints (api_key_env unset) remain valid without a key.
+                key_env = str(pconf.get("api_key_env") or "").strip()
+                configured_key = str(pconf.get("api_key") or "").strip()
+                if key_env and not configured_key and not os.environ.get(key_env, "").strip():
+                    logger.warning("Skipping enabled provider %s: required credential %s is not configured", name, key_env)
+                    continue
 
                 provider: LLMProvider
                 if provider_type in ("local_ollama", "ollama"):

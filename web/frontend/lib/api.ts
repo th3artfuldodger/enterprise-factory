@@ -516,6 +516,7 @@ export interface CustomerFactoryPayload {
     permissions?: string[];
     supervisor_id?: string | null;
     supervisor_label?: string | null;
+    disabled?: boolean;
   }>;
   projects: Array<{
     id: string;
@@ -535,8 +536,18 @@ export interface CustomerFactoryPayload {
     funding_requests?: Array<{ id?: string; product_id?: string; amount_usd?: number; purpose?: string; status?: string; created_at?: number }>;
     task_summary?: Record<string, number>;
     timeline?: Array<{ id: string; kind: string; timestamp?: number; status?: string; actor?: string; agent_type?: string; label?: string; evidence_count?: number; retry_count?: number; error?: string | null; retryable?: boolean; task_id?: string }>;
+    stall?: { stalled?: boolean; age_seconds?: number; reason?: string; blocked_tasks?: number; recommendation?: string | null };
+    paused?: boolean;
+    archived?: boolean;
   }>;
   task_count: number;
+  plan?: string;
+  usage?: { plan?: string; limits?: Record<string, number>; projects?: number; personnel?: number; managers?: number; tasks_total?: number; active_tasks?: number; task_retries?: number; llm_calls?: number; llm_tokens?: number; llm_estimated_cost_usd?: number; task_status?: Record<string, number> };
+  mission_templates?: Array<{ id: string; label: string; prompt: string }>;
+  audit_log?: Array<{ id: string; timestamp: number; event: string; actor?: string; product_id?: string | null; task_id?: string | null; detail?: Record<string, unknown>; financial_authority?: boolean }>;
+  backup?: { count?: number; latest?: { filename?: string; size_bytes?: number; created_at?: number } | null };
+  qa_canary?: { ok?: boolean; checked_at?: number; checks?: Record<string, boolean>; errors?: string[]; status?: string };
+  model_failover?: { router_enabled?: boolean; primary?: string; degraded_mode?: boolean; note?: string };
   provider_health?: { provider?: string; online?: boolean; status?: string; version?: string | null; models?: string[]; latency_ms?: number; last_checked_at?: number; recovery_count?: number; last_recovered_at?: number | null; error?: string | null };
   funding?: {
     request_count?: number;
@@ -1083,6 +1094,30 @@ class ApiClient {
     return this.request(`/customer/factory/tasks/${encodeURIComponent(taskId)}/retry`, {
       method: 'POST',
     });
+  }
+
+  async onboardCustomerFactory(goal: string): Promise<any> {
+    return this.request('/customer/factory/onboarding', { method: 'POST', body: JSON.stringify({ goal }) });
+  }
+
+  async controlCustomerFactoryProject(productId: string, action: 'pause' | 'resume' | 'archive' | 'restore'): Promise<any> {
+    return this.request(`/customer/factory/projects/${encodeURIComponent(productId)}/control`, { method: 'POST', body: JSON.stringify({ action }) });
+  }
+
+  async autoDelegateCustomerFactoryProject(productId: string): Promise<any> {
+    return this.request(`/customer/factory/projects/${encodeURIComponent(productId)}/auto-delegate`, { method: 'POST' });
+  }
+
+  async retryFailedCustomerFactoryProject(productId: string): Promise<any> {
+    return this.request(`/customer/factory/projects/${encodeURIComponent(productId)}/retry-failed`, { method: 'POST' });
+  }
+
+  async setCustomerFactoryPersonnelEnabled(agentId: string, enabled: boolean): Promise<any> {
+    return this.request(`/customer/factory/personnel/${encodeURIComponent(agentId)}/control`, { method: 'POST', body: JSON.stringify({ enabled }) });
+  }
+
+  async backupCustomerFactory(): Promise<any> {
+    return this.request('/customer/factory/backup', { method: 'POST' });
   }
 
   async getCustomerOrders(): Promise<{ orders: any[]; count: number }> {

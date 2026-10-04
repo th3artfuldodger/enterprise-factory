@@ -249,6 +249,8 @@ async def lifespan(app: FastAPI):
 
     standup_task = asyncio.create_task(standup_scheduler_loop(app))
     backup_schedule_task = asyncio.create_task(factory_backup_scheduler_loop(app))
+    from web.backend.services.customer_factory_canary import customer_factory_canary_loop
+    customer_factory_canary_task = asyncio.create_task(customer_factory_canary_loop())
     uni_jobs_task = asyncio.create_task(uni_scheduler_loop(app))
     from web.backend.services.host_disk_monitor import host_disk_monitor_loop
 
@@ -276,10 +278,11 @@ async def lifespan(app: FastAPI):
             log_suppressed(logger, "llm_router close on shutdown", exc_info=_suppressed_exc)
     standup_task.cancel()
     backup_schedule_task.cancel()
+    customer_factory_canary_task.cancel()
     uni_jobs_task.cancel()
     disk_monitor_task.cancel()
     pipeline_metrics_task.cancel()
-    for task in (standup_task, backup_schedule_task, uni_jobs_task, disk_monitor_task, pipeline_metrics_task):
+    for task in (standup_task, backup_schedule_task, customer_factory_canary_task, uni_jobs_task, disk_monitor_task, pipeline_metrics_task):
         try:
             await task
         except asyncio.CancelledError as _suppressed_exc:
