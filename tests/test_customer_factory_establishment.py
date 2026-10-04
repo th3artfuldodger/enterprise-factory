@@ -89,3 +89,14 @@ def test_mission_capacity_blocks_second_concurrent_free_mission(tmp_path, monkey
     sm.upsert_task({"id":"task-active1234","workspace_id":ctx["workspace_id"],"product_id":"prod-active1234","agent_type":"analyst","status":"running","state":"TEST","created_at":time.time(),"input_data":{}}); sm.close()
     with pytest.raises(ValueError, match="concurrent mission"):
         est.enforce_mission_capacity(cid,"free")
+
+
+def test_isolated_synthetic_canary_exercises_mission_delegation_ultron_and_recovery():
+    from web.backend.services.customer_factory_canary import _isolated_customer_journey
+    result = _isolated_customer_journey()
+    for key in (
+        "mission_created", "five_research_lenses", "manager_stage_present",
+        "ultron_stage_present", "delegation_queued", "recovery_queued", "workspace_isolation",
+    ):
+        assert result[key] is True
+    assert result["financial_authority"] is False
