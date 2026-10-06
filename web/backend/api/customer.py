@@ -621,11 +621,14 @@ async def customer_manager_delegate(
     payload: dict = Depends(_get_token_payload),
 ):
     from web.backend.services.customer_workforce import delegate_customer_manager_task, list_customer_personnel
-    from web.backend.services.customer_factory_establishment import emit_audit, enforce_capacity
+    from web.backend.services.customer_factory_establishment import emit_audit, enforce_capacity, enforce_customer_cost_guard, enforce_delegation_loop_guard
     customer_id = str(payload["sub"]); _enforce_factory_write_limit(customer_id, "delegate", max_hits=120)
     plan=str((commerce.get_customer(customer_id) or {}).get("plan") or "free").lower()
     try:
-        enforce_capacity(customer_id,plan,"active_task",list_customer_personnel(customer_id))
+        workforce = list_customer_personnel(customer_id)
+        enforce_capacity(customer_id,plan,"active_task",workforce)
+        enforce_customer_cost_guard(customer_id, plan, workforce)
+        enforce_delegation_loop_guard(customer_id, body.product_id, plan)
         result = delegate_customer_manager_task(
             customer_id,
             manager_id=manager_id,
@@ -825,7 +828,8 @@ async def customer_factory_project_control(product_id: str, body: CustomerProjec
 async def customer_factory_auto_delegate(product_id: str, payload: dict = Depends(_get_token_payload)):
     from web.backend.services.customer_factory_establishment import auto_delegate
     customer_id=str(payload["sub"]); _enforce_factory_write_limit(customer_id,"auto-delegate",max_hits=30)
-    try: return auto_delegate(customer_id, product_id)
+    plan=str((commerce.get_customer(customer_id) or {}).get("plan") or "free").lower()
+    try: return auto_delegate(customer_id, product_id, plan)
     except ValueError as exc: raise HTTPException(status_code=400, detail=client_error_detail(exc)) from exc
 
 

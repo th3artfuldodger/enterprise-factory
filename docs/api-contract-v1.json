@@ -1,0 +1,50 @@
+{
+  "contract": "factory-v1",
+  "required": [
+    {
+      "method": "GET",
+      "path": "/api/customer/factory"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health/ready"
+    },
+    {
+      "method": "POST",
+      "path": "/api/customer/factory/backup"
+    },
+    {
+      "method": "POST",
+      "path": "/api/customer/factory/managers/{manager_id}/delegate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/customer/factory/mission"
+    },
+    {
+      "method": "POST",
+      "path": "/api/customer/factory/personnel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/customer/factory/projects/{product_id}/auto-delegate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/customer/factory/projects/{product_id}/control"
+    },
+    {
+      "method": "POST",
+      "path": "/api/customer/factory/projects/{product_id}/retry-failed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/customer/factory/tasks/{task_id}/retry"
+    }
+  ],
+  "missing": []
+}

@@ -11,10 +11,10 @@ from orchestrator.sqlite_manager import SQLiteManager
 from web.backend.services.tenant_workspaces import customer_workspace_context, read_customer_pipeline_state, write_customer_product
 
 PLAN_LIMITS = {
-    "free": {"projects": 3, "personnel": 4, "managers": 1, "active_tasks": 12, "concurrent_missions": 1, "retries_per_hour": 8, "history": 100},
-    "maker": {"projects": 20, "personnel": 20, "managers": 4, "active_tasks": 40, "concurrent_missions": 5, "retries_per_hour": 30, "history": 500},
-    "studio": {"projects": 100, "personnel": 75, "managers": 15, "active_tasks": 150, "concurrent_missions": 20, "retries_per_hour": 100, "history": 2000},
-    "enterprise": {"projects": 1000, "personnel": 500, "managers": 100, "active_tasks": 1000, "concurrent_missions": 200, "retries_per_hour": 1000, "history": 10000},
+    "free": {"projects": 3, "personnel": 4, "managers": 1, "active_tasks": 12, "concurrent_missions": 1, "retries_per_hour": 8, "history": 100, "llm_cost_usd": 2, "delegations_per_project": 20, "auto_delegations_per_project": 4},
+    "maker": {"projects": 20, "personnel": 20, "managers": 4, "active_tasks": 40, "concurrent_missions": 5, "retries_per_hour": 30, "history": 500, "llm_cost_usd": 20, "delegations_per_project": 100, "auto_delegations_per_project": 15},
+    "studio": {"projects": 100, "personnel": 75, "managers": 15, "active_tasks": 150, "concurrent_missions": 20, "retries_per_hour": 100, "history": 2000, "llm_cost_usd": 100, "delegations_per_project": 500, "auto_delegations_per_project": 50},
+    "enterprise": {"projects": 1000, "personnel": 500, "managers": 100, "active_tasks": 1000, "concurrent_missions": 200, "retries_per_hour": 1000, "history": 10000, "llm_cost_usd": 1000, "delegations_per_project": 2000, "auto_delegations_per_project": 200},
 }
 
 MISSION_TEMPLATES = [
@@ -80,6 +80,34 @@ def enforce_capacity(customer_id: str, plan: str, kind: str, workforce: list[dic
     used_key,limit_key=mapping[kind]
     if int(u.get(used_key,0)) >= int(lim[limit_key]): raise ValueError(f"{plan.title()} plan {kind.replace('_',' ')} limit reached")
 
+
+
+def enforce_customer_cost_guard(customer_id: str, plan: str, workforce: list[dict[str, Any]] | None = None) -> None:
+    """Stop new expensive work once the plan's measured LLM spend ceiling is reached."""
+    usage = usage_summary(customer_id, plan, workforce or [])
+    cap = float(limits_for(plan).get("llm_cost_usd") or 0)
+    spent = float(usage.get("llm_estimated_cost_usd") or 0)
+    if cap > 0 and spent >= cap:
+        raise ValueError(f"{plan.title()} plan LLM cost ceiling reached (${spent:.2f} / ${cap:.2f})")
+
+
+def enforce_delegation_loop_guard(customer_id: str, product_id: str, plan: str, *, automatic: bool = False) -> None:
+    """Bound recursive manager delegation so a bad manager cannot create runaway work."""
+    state = read_customer_pipeline_state(customer_id)
+    if product_id not in (state.get("products") or {}):
+        raise ValueError("Project not found in this customer Factory")
+    delegated = []
+    for task in state.get("task_queue") or []:
+        if str(task.get("product_id") or "") != product_id:
+            continue
+        inp = task.get("input_data") or {}
+        if bool(inp.get("manager_delegated")):
+            delegated.append(task)
+    key = "auto_delegations_per_project" if automatic else "delegations_per_project"
+    limit = int(limits_for(plan).get(key) or 1)
+    if len(delegated) >= limit:
+        label = "automatic delegation" if automatic else "manager delegation"
+        raise ValueError(f"{plan.title()} plan {label} limit reached for this project")
 
 
 def enforce_mission_capacity(customer_id: str, plan: str) -> None:
@@ -162,10 +190,12 @@ def maybe_daily_snapshot(customer_id: str) -> None:
     st=snapshot_status(customer_id); latest=st.get('latest') or {}
     if time.time()-float(latest.get('created_at') or 0)>86400: tenant_snapshot(customer_id)
 
-def auto_delegate(customer_id: str, product_id: str) -> dict[str, Any]:
+def auto_delegate(customer_id: str, product_id: str, plan: str = "free") -> dict[str, Any]:
     from web.backend.services.customer_workforce import create_customer_personnel, delegate_customer_manager_task, list_customer_personnel
     state=read_customer_pipeline_state(customer_id); product=(state.get('products') or {}).get(product_id)
     if not product: raise ValueError('Project not found in this customer Factory')
+    enforce_customer_cost_guard(customer_id, plan)
+    enforce_delegation_loop_guard(customer_id, product_id, plan, automatic=True)
     workforce=list_customer_personnel(customer_id)
     managers=[x for x in workforce if x.get('role_class')=='manager' and not x.get('disabled') and 'assign_work' in (x.get('permissions') or [])]
     if not managers:
